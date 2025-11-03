@@ -1,6 +1,6 @@
 [package]
 name = "terminus-store"
-version = "0.21.1"
+version = "0.21.5"
 authors = ["Matthijs van Otterdijk <matthijs@datachemist.com>"]
 edition = "2018"
 license = "Apache-2.0"
@@ -36,6 +36,7 @@ regex = "1.5"
 lru = "0.10"
 bitvec = "1.0"
 tempfile = "3.1"
+tdb-succinct = "0.1.1"
 
 [features]
 noreadlock = []

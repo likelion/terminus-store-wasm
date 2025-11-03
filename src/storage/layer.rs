@@ -15,13 +15,13 @@ use crate::layer::{
     OptInternalLayerTriplePredicateIterator, OptInternalLayerTripleSubjectIterator, RollupLayer,
     SimpleLayerBuilder,
 };
-use crate::structure::bitarray::bitarray_len_from_file;
-use crate::structure::dict_file_get_count;
-use crate::structure::logarray::logarray_file_get_length_and_width;
-use crate::structure::StringDict;
-use crate::structure::TypedDict;
-use crate::structure::{util, AdjacencyList, BitIndex, LogArray, MonotonicLogArray, WaveletTree};
 use crate::Layer;
+use tdb_succinct::bitarray::bitarray_len_from_file;
+use tdb_succinct::dict_file_get_count;
+use tdb_succinct::logarray::logarray_file_get_length_and_width;
+use tdb_succinct::StringDict;
+use tdb_succinct::TypedDict;
+use tdb_succinct::{util, AdjacencyList, BitIndex, LogArray, MonotonicLogArray, WaveletTree};
 
 use bitvec::prelude::*;
 use std::convert::TryInto;
@@ -2626,7 +2626,7 @@ pub(crate) async fn file_triple_iterator_by_object<F: FileLoad + FileStore>(
     let s_p_aj: AdjacencyList = s_p_maps.into();
 
     Ok(
-        InternalLayerTripleObjectIterator::new(subjects, objects, o_ps_aj, s_p_aj)
+        InternalLayerTripleObjectIterator::new(subjects, objects, o_ps_aj, s_p_aj, true)
             .seek_object(object),
     )
 }
@@ -2651,11 +2651,10 @@ pub(crate) async fn file_triple_layer_count<F: FileLoad + FileStore>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::layer::{Layer, ObjectType, ValueTriple};
+    use crate::layer::{ObjectType, ValueTriple};
     use crate::storage::directory::DirectoryLayerStore;
     use crate::storage::memory::MemoryLayerStore;
     use std::collections::HashMap;
-    use std::io;
     use tempfile::{tempdir, TempDir};
     // these tests are for both the memory store and the directory store
     // They test functionality that should really work for both

@@ -1,7 +1,7 @@
 use crate::layer::*;
-use crate::structure::*;
 use std::cmp::Ordering;
 use std::convert::TryInto;
+use tdb_succinct::*;
 use thiserror::Error;
 
 #[derive(Clone)]
@@ -22,9 +22,9 @@ impl InternalLayerTripleSubjectIterator {
         sp_o_adjacency_list: AdjacencyList,
     ) -> Self {
         Self {
-            subjects: subjects,
-            s_p_adjacency_list: s_p_adjacency_list,
-            sp_o_adjacency_list: sp_o_adjacency_list,
+            subjects,
+            s_p_adjacency_list,
+            sp_o_adjacency_list,
             s_position: 0,
             s_p_position: 0,
             sp_o_position: 0,
@@ -138,10 +138,7 @@ impl Iterator for InternalLayerTripleSubjectIterator {
             if self.sp_o_position >= self.sp_o_adjacency_list.right_count() as u64 {
                 return None;
             } else {
-                let subject = match self.subjects.as_ref() {
-                    Some(subjects) => subjects.entry(self.s_position.try_into().unwrap()),
-                    None => self.s_position + 1,
-                };
+                let s_pos = self.s_position;
 
                 let s_p_bit = self.s_p_adjacency_list.bit_at_pos(self.s_p_position);
                 let predicate = self.s_p_adjacency_list.num_at_pos(self.s_p_position);
@@ -167,6 +164,11 @@ impl Iterator for InternalLayerTripleSubjectIterator {
                 if object == 0 {
                     continue;
                 }
+
+                let subject = match self.subjects.as_ref() {
+                    Some(subjects) => subjects.entry(s_pos.try_into().unwrap()),
+                    None => s_pos + 1,
+                };
 
                 return Some(IdTriple::new(subject, predicate, object));
             }
@@ -452,10 +454,10 @@ impl Iterator for InternalTripleStackIterator {
 
 #[cfg(test)]
 mod tests {
-    use crate::layer::base::tests::*;
-    use crate::layer::child::tests::*;
+    use crate::layer::base::base_tests::*;
+    use crate::layer::child::child_tests::*;
     use crate::layer::*;
-    use crate::structure::TdbDataType;
+    use tdb_succinct::TdbDataType;
 
     use std::sync::Arc;
 

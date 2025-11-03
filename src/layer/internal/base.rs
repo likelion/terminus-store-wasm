@@ -9,8 +9,8 @@ use super::super::builder::*;
 use super::super::id_map::*;
 use super::super::layer::*;
 use crate::layer::InternalLayer;
-use crate::structure::*;
 use crate::{chrono_log, storage::*};
+use tdb_succinct::*;
 
 use std::io;
 use std::pin::Pin;
@@ -490,7 +490,7 @@ pub async fn open_base_triple_stream<F: 'static + FileLoad + FileStore>(
 }
 
 #[cfg(test)]
-pub mod tests {
+pub mod base_tests {
     use super::*;
     use crate::storage::memory::*;
     use futures::stream::TryStreamExt;

@@ -1,6 +1,6 @@
 use crate::layer::*;
-use crate::structure::*;
 use std::convert::TryInto;
+use tdb_succinct::*;
 
 #[derive(Clone)]
 pub struct InternalLayerTriplePredicateIterator {
@@ -182,8 +182,8 @@ impl Iterator for InternalTriplePredicateIterator {
 
 #[cfg(test)]
 mod tests {
-    use crate::layer::base::tests::*;
-    use crate::layer::child::tests::*;
+    use crate::layer::base::base_tests::*;
+    use crate::layer::child::child_tests::*;
     use crate::layer::*;
 
     use std::sync::Arc;

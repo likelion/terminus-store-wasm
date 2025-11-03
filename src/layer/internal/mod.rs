@@ -8,7 +8,7 @@ mod subject_iterator;
 
 use super::id_map::*;
 use super::layer::*;
-use crate::structure::*;
+use tdb_succinct::*;
 
 use std::collections::HashSet;
 use std::convert::TryInto;
@@ -416,7 +416,7 @@ impl InternalLayer {
         Box::new(
             self.internal_triple_additions_by_object()
                 .seek_object(object)
-                .take_while(move |t| t.object == object),
+                .stop_at_boundary(true),
         )
     }
 
@@ -426,6 +426,7 @@ impl InternalLayer {
             self.pos_objects().cloned(),
             self.pos_o_ps_adjacency_list().clone(),
             self.pos_s_p_adjacency_list().clone(),
+            false,
         )))
     }
 
@@ -436,7 +437,7 @@ impl InternalLayer {
         Box::new(
             self.internal_triple_removals_by_object()
                 .seek_object(object)
-                .take_while(move |t| t.object == object),
+                .stop_at_boundary(true),
         )
     }
 
@@ -458,6 +459,7 @@ impl InternalLayer {
                     neg_objects.cloned(),
                     neg_o_ps_adjacency_list.clone(),
                     neg_s_p_adjacency_list.clone(),
+                    false,
                 )),
                 _ => None,
             },
@@ -734,7 +736,6 @@ impl Layer for InternalLayer {
         if id == 0 {
             return None;
         }
-
         let mut corrected_id = id;
         let mut current_option: Option<&InternalLayer> = Some(self);
         let mut parent_count = self.node_and_value_count() as u64;
@@ -744,7 +745,7 @@ impl Layer for InternalLayer {
                     - current_layer.node_dict_len() as u64
                     - current_layer.value_dict_len() as u64;
 
-                if corrected_id >= parent_count {
+                if corrected_id > parent_count {
                     // object, if it exists, is in this layer
                     corrected_id -= parent_count;
                 } else {
@@ -757,7 +758,17 @@ impl Layer for InternalLayer {
                 .node_value_id_map()
                 .outer_to_inner(corrected_id);
 
-            return Some(corrected_id < current_layer.node_dict_len() as u64);
+            if corrected_id
+                > (current_layer.node_dict_len() + current_layer.value_dict_len()) as u64
+            {
+                return None;
+            }
+            if corrected_id > current_layer.node_dict_len() as u64 {
+                // object, if it exists, must be a value
+                return Some(false);
+            }
+
+            return Some(true);
         }
 
         None
@@ -1050,8 +1061,10 @@ pub(crate) fn layer_triple_exists(
 
 #[cfg(test)]
 mod tests {
+    use tempfile::tempdir;
+
     use super::*;
-    use crate::open_sync_memory_store;
+    use crate::open_directory_store;
     use crate::store::sync::*;
 
     fn create_base_layer(store: &SyncStore) -> SyncStoreLayer {
@@ -1098,7 +1111,7 @@ mod tests {
         assert_eq!(1, layer.triple_layer_removal_count().unwrap());
     }
 
-    use crate::layer::base::tests::*;
+    use crate::layer::base::base_tests::*;
     #[tokio::test]
     async fn base_layer_with_gaps_addition_count() {
         let files = base_layer_files();
@@ -1120,5 +1133,23 @@ mod tests {
             .unwrap();
 
         assert_eq!(1, layer.internal_triple_layer_addition_count());
+    }
+
+    #[tokio::test]
+    async fn object_is_node_in_base_layer() {
+        let dir = tempdir().unwrap();
+        let store = open_directory_store(dir.path());
+        let builder = store.create_base_layer().await.unwrap();
+        builder
+            .add_value_triple(ValueTriple::new_node("foo", "links_to", "bar"))
+            .unwrap();
+        builder
+            .add_value_triple(ValueTriple::new_string_value("foo", "links_to_data", "wow"))
+            .unwrap();
+        let layer = builder.commit().await.unwrap();
+        assert_eq!(Some(true), layer.id_object_is_node(1));
+        assert_eq!(Some(true), layer.id_object_is_node(2));
+        assert_eq!(Some(false), layer.id_object_is_node(3));
+        assert_eq!(None, layer.id_object_is_node(4));
     }
 }

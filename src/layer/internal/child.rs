@@ -7,8 +7,8 @@ use super::super::builder::*;
 use super::super::id_map::*;
 use crate::layer::*;
 use crate::storage::*;
-use crate::structure::*;
 use rayon::prelude::*;
+use tdb_succinct::*;
 
 use std::io;
 use std::pin::Pin;
@@ -702,9 +702,9 @@ pub async fn open_child_triple_stream<F: 'static + FileLoad + FileStore>(
 }
 
 #[cfg(test)]
-pub mod tests {
+pub mod child_tests {
     use super::*;
-    use crate::layer::base::tests::*;
+    use crate::layer::base::base_tests::*;
     use crate::storage::memory::*;
     use futures::stream::TryStreamExt;
 
