@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::sync::LazyLock;
 
 use num_derive::FromPrimitive;
 
@@ -256,8 +257,7 @@ pub const FILENAMES: Filenames = Filenames {
     rollup: "rollup.hex",
 };
 
-lazy_static! {
-    pub static ref FILENAME_ENUM_MAP: HashMap<&'static str, LayerFileEnum> = HashMap::from([
+pub static FILENAME_ENUM_MAP: LazyLock<HashMap<&'static str, LayerFileEnum>> = LazyLock::new(|| HashMap::from([
         (
             "node_dictionary_blocks.tfc",
             LayerFileEnum::NodeDictionaryBlocks
@@ -502,8 +502,7 @@ lazy_static! {
         ),
         ("parent.hex", LayerFileEnum::Parent),
         ("rollup.hex", LayerFileEnum::Rollup),
-    ]);
-}
+    ]));
 
 pub const SHARED_REQUIRED_FILES: [&'static str; 8] = [
     FILENAMES.node_dictionary_blocks,

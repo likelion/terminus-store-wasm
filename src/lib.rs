@@ -1,6 +1,6 @@
 #![type_length_limit = "10628160"]
 
-//! Tokio-enabled data store for triple data
+//! Synchronous data store for triple data
 //!
 //! This library implements a way to store triple data - data that
 //! consists of a subject, predicate and an object, where object can
@@ -12,25 +12,13 @@
 //! assumptions on what valid data is, only focusing on the actual
 //! storage aspect.
 //!
-//! This library is tokio-enabled. Any i/o and locking happens through
-//! futures, and as a result, many of the functions in this library
-//! return futures. These futures are intended to run on a tokio
-//! runtime, and many of them will fail outside of one. If you do not
-//! wish to use tokio, there's a small sync wrapper in `store::sync`
-//! which embeds its own tokio runtime, exposing a purely synchronous
-//! API.
-//!
 //! Most users will probably only need to use the types and functions
-//! in the `store` module (or `store::sync` for the synchronous
-//! version). This module provides a high-level API which should be
-//! sufficient for creating and querying databases.
+//! in the `store` module. This module provides a high-level API which
+//! should be sufficient for creating and querying databases.
 //!
-//! The `structure`, `layer`, and `storage` module expose the inner
-//! workings of terminus-store. They are useful for implementing new
-//! storage backends, or writing analysis and recovery tools.
-#[macro_use]
-extern crate lazy_static;
-
+//! The `layer` and `storage` modules expose the inner workings of
+//! terminus-store-wasm. They are useful for implementing new storage
+//! backends, or writing analysis and recovery tools.
 pub mod layer;
 #[macro_use]
 pub(crate) mod logging;
@@ -38,5 +26,4 @@ pub mod storage;
 pub mod store;
 
 pub use layer::{IdTriple, Layer, ObjectType, ValueTriple};
-pub use store::sync::{open_sync_archive_store, open_sync_directory_store, open_sync_memory_store};
-pub use store::{open_archive_store, open_directory_store, open_memory_store};
+pub use store::{open_directory_store, open_memory_store};

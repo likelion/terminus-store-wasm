@@ -16,22 +16,20 @@ use crate::layer::{
     SimpleLayerBuilder,
 };
 use crate::Layer;
-use tdb_succinct::bitarray::bitarray_len_from_file;
-use tdb_succinct::dict_file_get_count;
-use tdb_succinct::logarray::logarray_file_get_length_and_width;
-use tdb_succinct::StringDict;
-use tdb_succinct::TypedDict;
-use tdb_succinct::{util, AdjacencyList, BitIndex, LogArray, MonotonicLogArray, WaveletTree};
+use tdb_succinct_wasm::bitarray::bitarray_len_from_file;
+use tdb_succinct_wasm::dict_file_get_count;
+use tdb_succinct_wasm::logarray::logarray_file_get_length_and_width;
+use tdb_succinct_wasm::StringDict;
+use tdb_succinct_wasm::TypedDict;
+use tdb_succinct_wasm::{util, AdjacencyList, BitIndex, LogArray, MonotonicLogArray, WaveletTree};
 
 use bitvec::prelude::*;
 use std::convert::TryInto;
-use std::io;
+use std::io::{self, Read, Write};
 use std::path::Path;
 use std::sync::Arc;
 
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
-use async_trait::async_trait;
 
 macro_rules! walk_backwards_from_disk {
     ($store:ident, $name:ident, $current:ident, $body:block) => {
@@ -39,7 +37,7 @@ macro_rules! walk_backwards_from_disk {
         loop {
             $body
 
-            if let Some(parent) = $store.get_layer_parent_name($current).await? {
+            if let Some(parent) = $store.get_layer_parent_name($current)? {
                 $current = parent;
             }
             else {
@@ -59,7 +57,7 @@ macro_rules! walk_backwards_from_disk_upto {
 
             $body
 
-            if let Some(parent) = $store.get_layer_parent_name($current).await? {
+            if let Some(parent) = $store.get_layer_parent_name($current)? {
                 $current = parent;
             }
             else {
@@ -69,81 +67,80 @@ macro_rules! walk_backwards_from_disk_upto {
     }
 }
 
-#[async_trait]
 pub trait LayerStore: 'static + Packable + Send + Sync {
-    async fn layers(&self) -> io::Result<Vec<[u32; 5]>>;
-    async fn get_layer_with_cache(
+    fn layers(&self) -> io::Result<Vec<[u32; 5]>>;
+    fn get_layer_with_cache(
         &self,
         name: [u32; 5],
         cache: Arc<dyn LayerCache>,
     ) -> io::Result<Option<Arc<InternalLayer>>>;
-    async fn get_layer(&self, name: [u32; 5]) -> io::Result<Option<Arc<InternalLayer>>> {
-        self.get_layer_with_cache(name, NOCACHE.clone()).await
+    fn get_layer(&self, name: [u32; 5]) -> io::Result<Option<Arc<InternalLayer>>> {
+        self.get_layer_with_cache(name, NOCACHE.clone())
     }
 
-    async fn finalize_layer(&self, _name: [u32; 5]) -> io::Result<()> {
+    fn finalize_layer(&self, _name: [u32; 5]) -> io::Result<()> {
         Ok(())
     }
 
-    async fn get_layer_parent_name(&self, name: [u32; 5]) -> io::Result<Option<[u32; 5]>>;
+    fn get_layer_parent_name(&self, name: [u32; 5]) -> io::Result<Option<[u32; 5]>>;
 
-    async fn get_node_dictionary(&self, name: [u32; 5]) -> io::Result<Option<StringDict>>;
+    fn get_node_dictionary(&self, name: [u32; 5]) -> io::Result<Option<StringDict>>;
 
-    async fn get_predicate_dictionary(&self, name: [u32; 5]) -> io::Result<Option<StringDict>>;
+    fn get_predicate_dictionary(&self, name: [u32; 5]) -> io::Result<Option<StringDict>>;
 
-    async fn get_value_dictionary(&self, name: [u32; 5]) -> io::Result<Option<TypedDict>>;
+    fn get_value_dictionary(&self, name: [u32; 5]) -> io::Result<Option<TypedDict>>;
 
-    async fn get_node_count(&self, name: [u32; 5]) -> io::Result<Option<u64>>;
+    fn get_node_count(&self, name: [u32; 5]) -> io::Result<Option<u64>>;
 
-    async fn get_predicate_count(&self, name: [u32; 5]) -> io::Result<Option<u64>>;
+    fn get_predicate_count(&self, name: [u32; 5]) -> io::Result<Option<u64>>;
 
-    async fn get_value_count(&self, name: [u32; 5]) -> io::Result<Option<u64>>;
+    fn get_value_count(&self, name: [u32; 5]) -> io::Result<Option<u64>>;
 
-    async fn get_node_value_idmap(&self, name: [u32; 5]) -> io::Result<Option<IdMap>>;
+    fn get_node_value_idmap(&self, name: [u32; 5]) -> io::Result<Option<IdMap>>;
 
-    async fn get_predicate_idmap(&self, name: [u32; 5]) -> io::Result<Option<IdMap>>;
+    fn get_predicate_idmap(&self, name: [u32; 5]) -> io::Result<Option<IdMap>>;
 
-    async fn create_base_layer(&self) -> io::Result<Box<dyn LayerBuilder>>;
-    async fn create_child_layer_with_cache(
+    fn create_base_layer(&self) -> io::Result<Box<dyn LayerBuilder>>;
+    fn create_child_layer_with_cache(
         &self,
         parent: [u32; 5],
         cache: Arc<dyn LayerCache>,
     ) -> io::Result<Box<dyn LayerBuilder>>;
-    async fn create_child_layer(&self, parent: [u32; 5]) -> io::Result<Box<dyn LayerBuilder>> {
+    fn create_child_layer(&self, parent: [u32; 5]) -> io::Result<Box<dyn LayerBuilder>> {
         self.create_child_layer_with_cache(parent, NOCACHE.clone())
-            .await
+            
     }
 
-    async fn perform_rollup(&self, layer: Arc<InternalLayer>) -> io::Result<[u32; 5]>;
-    async fn perform_rollup_upto_with_cache(
+    fn perform_rollup(&self, layer: Arc<InternalLayer>) -> io::Result<[u32; 5]>;
+    fn perform_rollup_upto_with_cache(
         &self,
         layer: Arc<InternalLayer>,
         upto: [u32; 5],
         cache: Arc<dyn LayerCache>,
     ) -> io::Result<[u32; 5]>;
-    async fn perform_rollup_upto(
+    fn perform_rollup_upto(
         &self,
         layer: Arc<InternalLayer>,
         upto: [u32; 5],
     ) -> io::Result<[u32; 5]> {
         self.perform_rollup_upto_with_cache(layer, upto, NOCACHE.clone())
-            .await
+            
     }
-    async fn perform_imprecise_rollup_upto_with_cache(
+    fn perform_imprecise_rollup_upto_with_cache(
         &self,
         layer: Arc<InternalLayer>,
         upto: [u32; 5],
         cache: Arc<dyn LayerCache>,
     ) -> io::Result<[u32; 5]>;
-    async fn perform_imprecise_rollup_upto(
+    fn perform_imprecise_rollup_upto(
         &self,
         layer: Arc<InternalLayer>,
         upto: [u32; 5],
     ) -> io::Result<[u32; 5]> {
         self.perform_rollup_upto_with_cache(layer, upto, NOCACHE.clone())
-            .await
+            
     }
-    async fn register_rollup(&self, layer: [u32; 5], rollup: [u32; 5]) -> io::Result<()>;
+    fn register_rollup(&self, layer: [u32; 5], rollup: [u32; 5]) -> io::Result<()>;
 
     /// Create a new rollup layer which rolls up all triples in the given layer, as well as all its ancestors.
     ///
@@ -152,15 +149,15 @@ pub trait LayerStore: 'static + Packable + Send + Sync {
     /// are, the longer queries take. Rollup is one approach of
     /// accomplishing this. Squash is another. Rollup is the better
     /// option if you need to retain history.
-    async fn rollup(self: Arc<Self>, layer: Arc<InternalLayer>) -> io::Result<[u32; 5]> {
+    fn rollup(self: Arc<Self>, layer: Arc<InternalLayer>) -> io::Result<[u32; 5]> {
         let name = layer.name();
-        let rollup = self.perform_rollup(layer).await?;
-        self.register_rollup(name, rollup).await?;
+        let rollup = self.perform_rollup(layer)?;
+        self.register_rollup(name, rollup)?;
 
         Ok(rollup)
     }
 
-    async fn rollup_upto_with_cache(
+    fn rollup_upto_with_cache(
         &self,
         layer: Arc<InternalLayer>,
         upto: [u32; 5],
@@ -169,8 +166,8 @@ pub trait LayerStore: 'static + Packable + Send + Sync {
         let name = layer.name();
         let rollup = self
             .perform_rollup_upto_with_cache(layer, upto, cache)
-            .await?;
-        self.register_rollup(name, rollup).await?;
+            ?;
+        self.register_rollup(name, rollup)?;
 
         Ok(rollup)
     }
@@ -182,12 +179,12 @@ pub trait LayerStore: 'static + Packable + Send + Sync {
     /// are, the longer queries take. Rollup is one approach of
     /// accomplishing this. Squash is another. Rollup is the better
     /// option if you need to retain history.
-    async fn rollup_upto(&self, layer: Arc<InternalLayer>, upto: [u32; 5]) -> io::Result<[u32; 5]> {
+    fn rollup_upto(&self, layer: Arc<InternalLayer>, upto: [u32; 5]) -> io::Result<[u32; 5]> {
         self.rollup_upto_with_cache(layer, upto, NOCACHE.clone())
-            .await
+            
     }
 
-    async fn imprecise_rollup_upto_with_cache(
+    fn imprecise_rollup_upto_with_cache(
         &self,
         layer: Arc<InternalLayer>,
         upto: [u32; 5],
@@ -196,8 +193,8 @@ pub trait LayerStore: 'static + Packable + Send + Sync {
         let name = layer.name();
         let rollup = self
             .perform_imprecise_rollup_upto_with_cache(layer, upto, cache)
-            .await?;
-        self.register_rollup(name, rollup).await?;
+            ?;
+        self.register_rollup(name, rollup)?;
 
         Ok(rollup)
     }
@@ -209,27 +206,27 @@ pub trait LayerStore: 'static + Packable + Send + Sync {
     /// are, the longer queries take. Rollup is one approach of
     /// accomplishing this. Squash is another. Rollup is the better
     /// option if you need to retain history.
-    async fn imprecise_rollup_upto(
+    fn imprecise_rollup_upto(
         &self,
         layer: Arc<InternalLayer>,
         upto: [u32; 5],
     ) -> io::Result<[u32; 5]> {
         self.imprecise_rollup_upto_with_cache(layer, upto, NOCACHE.clone())
-            .await
+            
     }
 
-    async fn squash(&self, layer: Arc<InternalLayer>) -> io::Result<[u32; 5]>;
-    async fn squash_upto(&self, layer: Arc<InternalLayer>, upto: [u32; 5]) -> io::Result<[u32; 5]>;
+    fn squash(&self, layer: Arc<InternalLayer>) -> io::Result<[u32; 5]>;
+    fn squash_upto(&self, layer: Arc<InternalLayer>, upto: [u32; 5]) -> io::Result<[u32; 5]>;
 
-    async fn merge_base_layer(&self, layers: &[[u32; 5]], temp_dir: &Path) -> io::Result<[u32; 5]>;
+    fn merge_base_layer(&self, layers: &[[u32; 5]], temp_dir: &Path) -> io::Result<[u32; 5]>;
 
-    async fn layer_is_ancestor_of(
+    fn layer_is_ancestor_of(
         &self,
         descendant: [u32; 5],
         ancestor: [u32; 5],
     ) -> io::Result<bool>;
 
-    async fn triple_addition_exists(
+    fn triple_addition_exists(
         &self,
         layer: [u32; 5],
         subject: u64,
@@ -237,7 +234,7 @@ pub trait LayerStore: 'static + Packable + Send + Sync {
         object: u64,
     ) -> io::Result<bool>;
 
-    async fn triple_removal_exists(
+    fn triple_removal_exists(
         &self,
         layer: [u32; 5],
         subject: u64,
@@ -245,84 +242,84 @@ pub trait LayerStore: 'static + Packable + Send + Sync {
         object: u64,
     ) -> io::Result<bool>;
 
-    async fn triple_additions(
+    fn triple_additions(
         &self,
         layer: [u32; 5],
     ) -> io::Result<OptInternalLayerTripleSubjectIterator>;
 
-    async fn triple_removals(
+    fn triple_removals(
         &self,
         layer: [u32; 5],
     ) -> io::Result<OptInternalLayerTripleSubjectIterator>;
 
-    async fn triple_additions_s(
+    fn triple_additions_s(
         &self,
         layer: [u32; 5],
         subject: u64,
     ) -> io::Result<Box<dyn Iterator<Item = IdTriple> + Send>>;
 
-    async fn triple_removals_s(
+    fn triple_removals_s(
         &self,
         layer: [u32; 5],
         subject: u64,
     ) -> io::Result<Box<dyn Iterator<Item = IdTriple> + Send>>;
 
-    async fn triple_additions_sp(
-        &self,
-        layer: [u32; 5],
-        subject: u64,
-        predicate: u64,
-    ) -> io::Result<Box<dyn Iterator<Item = IdTriple> + Send>>;
-
-    async fn triple_removals_sp(
+    fn triple_additions_sp(
         &self,
         layer: [u32; 5],
         subject: u64,
         predicate: u64,
     ) -> io::Result<Box<dyn Iterator<Item = IdTriple> + Send>>;
 
-    async fn triple_additions_p(
+    fn triple_removals_sp(
+        &self,
+        layer: [u32; 5],
+        subject: u64,
+        predicate: u64,
+    ) -> io::Result<Box<dyn Iterator<Item = IdTriple> + Send>>;
+
+    fn triple_additions_p(
         &self,
         layer: [u32; 5],
         predicate: u64,
     ) -> io::Result<Box<dyn Iterator<Item = IdTriple> + Send>>;
 
-    async fn triple_removals_o(
+    fn triple_removals_o(
         &self,
         layer: [u32; 5],
         object: u64,
     ) -> io::Result<Box<dyn Iterator<Item = IdTriple> + Send>>;
 
-    async fn triple_additions_o(
+    fn triple_additions_o(
         &self,
         layer: [u32; 5],
         object: u64,
     ) -> io::Result<Box<dyn Iterator<Item = IdTriple> + Send>>;
 
-    async fn triple_removals_p(
+    fn triple_removals_p(
         &self,
         layer: [u32; 5],
         predicate: u64,
     ) -> io::Result<Box<dyn Iterator<Item = IdTriple> + Send>>;
 
-    async fn triple_layer_addition_count(&self, layer: [u32; 5]) -> io::Result<usize>;
+    fn triple_layer_addition_count(&self, layer: [u32; 5]) -> io::Result<usize>;
 
-    async fn triple_layer_removal_count(&self, layer: [u32; 5]) -> io::Result<usize>;
+    fn triple_layer_removal_count(&self, layer: [u32; 5]) -> io::Result<usize>;
 
-    async fn retrieve_layer_stack_names(&self, name: [u32; 5]) -> io::Result<Vec<[u32; 5]>>;
+    fn retrieve_layer_stack_names(&self, name: [u32; 5]) -> io::Result<Vec<[u32; 5]>>;
 
-    async fn retrieve_layer_stack_names_upto(
+    fn retrieve_layer_stack_names_upto(
         &self,
         name: [u32; 5],
         upto: [u32; 5],
     ) -> io::Result<Vec<[u32; 5]>>;
 
-    async fn layer_changes(&self, name: [u32; 5]) -> io::Result<InternalTripleStackIterator> {
+    fn layer_changes(&self, name: [u32; 5]) -> io::Result<InternalTripleStackIterator> {
         let mut positives = Vec::new();
         let mut negatives = Vec::new();
         walk_backwards_from_disk!(self, name, current, {
-            positives.push(self.triple_additions(name).await?);
-            negatives.push(self.triple_removals(name).await?);
+            positives.push(self.triple_additions(name)?);
+            negatives.push(self.triple_removals(name)?);
         });
         positives.reverse();
         negatives.reverse();
@@ -332,7 +329,7 @@ pub trait LayerStore: 'static + Packable + Send + Sync {
         ))
     }
 
-    async fn layer_changes_upto(
+    fn layer_changes_upto(
         &self,
         name: [u32; 5],
         upto: [u32; 5],
@@ -340,8 +337,8 @@ pub trait LayerStore: 'static + Packable + Send + Sync {
         let mut positives = Vec::new();
         let mut negatives = Vec::new();
         walk_backwards_from_disk_upto!(self, name, upto, current, {
-            positives.push(self.triple_additions(current).await?);
-            negatives.push(self.triple_removals(current).await?);
+            positives.push(self.triple_additions(current)?);
+            negatives.push(self.triple_removals(current)?);
         });
         positives.reverse();
         negatives.reverse();
@@ -352,36 +349,35 @@ pub trait LayerStore: 'static + Packable + Send + Sync {
     }
 }
 
-#[async_trait]
 pub trait PersistentLayerStore: 'static + Send + Sync + Clone {
     type File: FileLoad + FileStore + Clone;
-    async fn directories(&self) -> io::Result<Vec<[u32; 5]>>;
-    async fn create_named_directory(&self, id: [u32; 5]) -> io::Result<[u32; 5]>;
-    async fn create_directory(&self) -> io::Result<[u32; 5]> {
+    fn directories(&self) -> io::Result<Vec<[u32; 5]>>;
+    fn create_named_directory(&self, id: [u32; 5]) -> io::Result<[u32; 5]>;
+    fn create_directory(&self) -> io::Result<[u32; 5]> {
         let name = rand::random();
-        self.create_named_directory(name).await
+        self.create_named_directory(name)
     }
 
-    async fn directory_exists(&self, name: [u32; 5]) -> io::Result<bool>;
-    async fn get_file(&self, directory: [u32; 5], name: &str) -> io::Result<Self::File>;
-    async fn file_exists(&self, directory: [u32; 5], file: &str) -> io::Result<bool>;
+    fn directory_exists(&self, name: [u32; 5]) -> io::Result<bool>;
+    fn get_file(&self, directory: [u32; 5], name: &str) -> io::Result<Self::File>;
+    fn file_exists(&self, directory: [u32; 5], file: &str) -> io::Result<bool>;
 
-    async fn finalize(&self, _directory: [u32; 5]) -> io::Result<()> {
+    fn finalize(&self, _directory: [u32; 5]) -> io::Result<()> {
         Ok(())
     }
 
-    async fn layer_has_rollup(&self, name: [u32; 5]) -> io::Result<bool> {
-        self.file_exists(name, FILENAMES.rollup).await
+    fn layer_has_rollup(&self, name: [u32; 5]) -> io::Result<bool> {
+        self.file_exists(name, FILENAMES.rollup)
     }
 
-    async fn layer_has_parent(&self, name: [u32; 5]) -> io::Result<bool> {
-        self.file_exists(name, FILENAMES.parent).await
+    fn layer_has_parent(&self, name: [u32; 5]) -> io::Result<bool> {
+        self.file_exists(name, FILENAMES.parent)
     }
 
-    async fn layer_parent(&self, name: [u32; 5]) -> io::Result<Option<[u32; 5]>> {
-        if self.directory_exists(name).await? {
-            if self.layer_has_parent(name).await? {
-                let parent = self.read_parent_file(name).await?;
+    fn layer_parent(&self, name: [u32; 5]) -> io::Result<Option<[u32; 5]>> {
+        if self.directory_exists(name)? {
+            if self.layer_has_parent(name)? {
+                let parent = self.read_parent_file(name)?;
                 Ok(Some(parent))
             } else {
                 Ok(None)
@@ -394,7 +390,7 @@ pub trait PersistentLayerStore: 'static + Send + Sync + Clone {
         }
     }
 
-    async fn base_layer_files(&self, name: [u32; 5]) -> io::Result<BaseLayerFiles<Self::File>> {
+    fn base_layer_files(&self, name: [u32; 5]) -> io::Result<BaseLayerFiles<Self::File>> {
         let filenames = vec![
             FILENAMES.node_dictionary_blocks,
             FILENAMES.node_dictionary_offsets,
@@ -432,7 +428,7 @@ pub trait PersistentLayerStore: 'static + Send + Sync + Clone {
         let mut files = Vec::with_capacity(filenames.len());
 
         for filename in filenames {
-            files.push(self.get_file(name, filename).await?);
+            files.push(self.get_file(name, filename)?);
         }
 
         Ok(BaseLayerFiles {
@@ -499,7 +495,7 @@ pub trait PersistentLayerStore: 'static + Send + Sync + Clone {
         })
     }
 
-    async fn child_layer_files(&self, name: [u32; 5]) -> io::Result<ChildLayerFiles<Self::File>> {
+    fn child_layer_files(&self, name: [u32; 5]) -> io::Result<ChildLayerFiles<Self::File>> {
         let filenames = vec![
             FILENAMES.node_dictionary_blocks,
             FILENAMES.node_dictionary_offsets,
@@ -553,7 +549,7 @@ pub trait PersistentLayerStore: 'static + Send + Sync + Clone {
 
         let mut files = Vec::with_capacity(filenames.len());
         for filename in filenames {
-            files.push(self.get_file(name, filename).await?);
+            files.push(self.get_file(name, filename)?);
         }
 
         Ok(ChildLayerFiles {
@@ -651,50 +647,50 @@ pub trait PersistentLayerStore: 'static + Send + Sync + Clone {
         })
     }
 
-    async fn write_parent_file(&self, dir_name: [u32; 5], parent_name: [u32; 5]) -> io::Result<()> {
+    fn write_parent_file(&self, dir_name: [u32; 5], parent_name: [u32; 5]) -> io::Result<()> {
         let parent_string = name_to_string(parent_name);
 
-        let file = self.get_file(dir_name, FILENAMES.parent).await?;
-        let mut writer = file.open_write().await?;
+        let file = self.get_file(dir_name, FILENAMES.parent)?;
+        let mut writer = file.open_write()?;
 
-        writer.write_all(parent_string.as_bytes()).await?;
-        writer.flush().await?;
-        writer.sync_all().await?;
+        writer.write_all(parent_string.as_bytes())?;
+        writer.flush()?;
+        writer.sync_all()?;
 
         Ok(())
     }
 
-    async fn read_parent_file(&self, dir_name: [u32; 5]) -> io::Result<[u32; 5]> {
-        let file = self.get_file(dir_name, FILENAMES.parent).await?;
-        let mut reader = file.open_read().await?;
+    fn read_parent_file(&self, dir_name: [u32; 5]) -> io::Result<[u32; 5]> {
+        let file = self.get_file(dir_name, FILENAMES.parent)?;
+        let mut reader = file.open_read()?;
 
         let mut buf = [0; 40];
-        reader.read_exact(&mut buf).await?;
+        reader.read_exact(&mut buf)?;
 
         bytes_to_name(&buf)
     }
 
     // TODO this should check if the rollup is better than what is there
-    async fn write_rollup_file(&self, dir_name: [u32; 5], rollup_name: [u32; 5]) -> io::Result<()> {
+    fn write_rollup_file(&self, dir_name: [u32; 5], rollup_name: [u32; 5]) -> io::Result<()> {
         let rollup_string = name_to_string(rollup_name);
 
-        let file = self.get_file(dir_name, FILENAMES.rollup).await?;
-        let mut writer = file.open_write().await?;
+        let file = self.get_file(dir_name, FILENAMES.rollup)?;
+        let mut writer = file.open_write()?;
 
         let contents = format!("{}\n{}\n", 1, rollup_string);
-        writer.write_all(contents.as_bytes()).await?;
-        writer.flush().await?;
-        writer.sync_all().await?;
+        writer.write_all(contents.as_bytes())?;
+        writer.flush()?;
+        writer.sync_all()?;
 
         Ok(())
     }
 
-    async fn read_rollup_file(&self, dir_name: [u32; 5]) -> io::Result<[u32; 5]> {
-        let file = self.get_file(dir_name, FILENAMES.rollup).await?;
-        let mut reader = file.open_read().await?;
+    fn read_rollup_file(&self, dir_name: [u32; 5]) -> io::Result<[u32; 5]> {
+        let file = self.get_file(dir_name, FILENAMES.rollup)?;
+        let mut reader = file.open_read()?;
 
         let mut data = Vec::new();
-        reader.read_to_end(&mut data).await?;
+        reader.read_to_end(&mut data)?;
 
         let s = String::from_utf8_lossy(&data);
         let lines: Vec<&str> = s.lines().collect();
@@ -714,12 +710,12 @@ pub trait PersistentLayerStore: 'static + Send + Sync + Clone {
         string_to_name(layer_str)
     }
 
-    async fn create_child_layer_files_with_cache(
+    fn create_child_layer_files_with_cache(
         &self,
         parent: [u32; 5],
         cache: Arc<dyn LayerCache>,
     ) -> io::Result<([u32; 5], Arc<InternalLayer>, ChildLayerFiles<Self::File>)> {
-        let parent_layer = match self.get_layer_with_cache(parent, cache).await? {
+        let parent_layer = match self.get_layer_with_cache(parent, cache)? {
             None => {
                 return Err(io::Error::new(
                     io::ErrorKind::NotFound,
@@ -729,25 +725,25 @@ pub trait PersistentLayerStore: 'static + Send + Sync + Clone {
             Some(parent_layer) => Ok::<_, io::Error>(parent_layer),
         }?;
 
-        let layer_dir = self.create_directory().await?;
-        self.write_parent_file(layer_dir, parent).await?;
-        let child_layer_files = self.child_layer_files(layer_dir).await?;
+        let layer_dir = self.create_directory()?;
+        self.write_parent_file(layer_dir, parent)?;
+        let child_layer_files = self.child_layer_files(layer_dir)?;
 
         Ok((layer_dir, parent_layer, child_layer_files))
     }
 
-    async fn node_dictionary_files(
+    fn node_dictionary_files(
         &self,
         layer: [u32; 5],
     ) -> io::Result<DictionaryFiles<Self::File>> {
         // does layer exist?
-        if self.directory_exists(layer).await? {
+        if self.directory_exists(layer)? {
             let offsets_file = self
                 .get_file(layer, FILENAMES.node_dictionary_offsets)
-                .await?;
+                ?;
             let blocks_file = self
                 .get_file(layer, FILENAMES.node_dictionary_blocks)
-                .await?;
+                ?;
 
             Ok(DictionaryFiles {
                 blocks_file,
@@ -758,18 +754,18 @@ pub trait PersistentLayerStore: 'static + Send + Sync + Clone {
         }
     }
 
-    async fn predicate_dictionary_files(
+    fn predicate_dictionary_files(
         &self,
         layer: [u32; 5],
     ) -> io::Result<DictionaryFiles<Self::File>> {
         // does layer exist?
-        if self.directory_exists(layer).await? {
+        if self.directory_exists(layer)? {
             let offsets_file = self
                 .get_file(layer, FILENAMES.predicate_dictionary_offsets)
-                .await?;
+                ?;
             let blocks_file = self
                 .get_file(layer, FILENAMES.predicate_dictionary_blocks)
-                .await?;
+                ?;
 
             Ok(DictionaryFiles {
                 blocks_file,
@@ -780,24 +776,24 @@ pub trait PersistentLayerStore: 'static + Send + Sync + Clone {
         }
     }
 
-    async fn value_dictionary_files(
+    fn value_dictionary_files(
         &self,
         layer: [u32; 5],
     ) -> io::Result<TypedDictionaryFiles<Self::File>> {
         // does layer exist?
-        if self.directory_exists(layer).await? {
+        if self.directory_exists(layer)? {
             let types_present_file = self
                 .get_file(layer, FILENAMES.value_dictionary_types_present)
-                .await?;
+                ?;
             let type_offsets_file = self
                 .get_file(layer, FILENAMES.value_dictionary_type_offsets)
-                .await?;
+                ?;
             let offsets_file = self
                 .get_file(layer, FILENAMES.value_dictionary_offsets)
-                .await?;
+                ?;
             let blocks_file = self
                 .get_file(layer, FILENAMES.value_dictionary_blocks)
-                .await?;
+                ?;
 
             Ok(TypedDictionaryFiles {
                 types_present_file,
@@ -810,21 +806,21 @@ pub trait PersistentLayerStore: 'static + Send + Sync + Clone {
         }
     }
 
-    async fn node_value_idmap_files(
+    fn node_value_idmap_files(
         &self,
         layer: [u32; 5],
     ) -> io::Result<BitIndexFiles<Self::File>> {
         // does layer exist?
-        if self.directory_exists(layer).await? {
+        if self.directory_exists(layer)? {
             let bits_file = self
                 .get_file(layer, FILENAMES.node_value_idmap_bits)
-                .await?;
+                ?;
             let blocks_file = self
                 .get_file(layer, FILENAMES.node_value_idmap_bit_index_blocks)
-                .await?;
+                ?;
             let sblocks_file = self
                 .get_file(layer, FILENAMES.node_value_idmap_bit_index_sblocks)
-                .await?;
+                ?;
 
             Ok(BitIndexFiles {
                 bits_file,
@@ -836,19 +832,19 @@ pub trait PersistentLayerStore: 'static + Send + Sync + Clone {
         }
     }
 
-    async fn predicate_idmap_files(
+    fn predicate_idmap_files(
         &self,
         layer: [u32; 5],
     ) -> io::Result<BitIndexFiles<Self::File>> {
         // does layer exist?
-        if self.directory_exists(layer).await? {
-            let bits_file = self.get_file(layer, FILENAMES.predicate_idmap_bits).await?;
+        if self.directory_exists(layer)? {
+            let bits_file = self.get_file(layer, FILENAMES.predicate_idmap_bits)?;
             let blocks_file = self
                 .get_file(layer, FILENAMES.predicate_idmap_bit_index_blocks)
-                .await?;
+                ?;
             let sblocks_file = self
                 .get_file(layer, FILENAMES.predicate_idmap_bit_index_sblocks)
-                .await?;
+                ?;
 
             Ok(BitIndexFiles {
                 bits_file,
@@ -860,7 +856,7 @@ pub trait PersistentLayerStore: 'static + Send + Sync + Clone {
         }
     }
 
-    async fn triple_addition_files(
+    fn triple_addition_files(
         &self,
         layer: [u32; 5],
     ) -> io::Result<(
@@ -869,7 +865,7 @@ pub trait PersistentLayerStore: 'static + Send + Sync + Clone {
         AdjacencyListFiles<Self::File>,
     )> {
         // does layer exist?
-        if self.directory_exists(layer).await? {
+        if self.directory_exists(layer)? {
             let (
                 s_p_aj_nums_file,
                 s_p_aj_bits_file,
@@ -883,64 +879,64 @@ pub trait PersistentLayerStore: 'static + Send + Sync + Clone {
                 sp_o_aj_bit_index_blocks_file,
                 sp_o_aj_bit_index_sblocks_file,
             );
-            if self.layer_has_parent(layer).await? {
+            if self.layer_has_parent(layer)? {
                 // this is a child layer
                 s_p_aj_nums_file = self
                     .get_file(layer, FILENAMES.pos_s_p_adjacency_list_nums)
-                    .await?;
+                    ?;
                 s_p_aj_bits_file = self
                     .get_file(layer, FILENAMES.pos_s_p_adjacency_list_bits)
-                    .await?;
+                    ?;
                 s_p_aj_bit_index_blocks_file = self
                     .get_file(layer, FILENAMES.pos_s_p_adjacency_list_bit_index_blocks)
-                    .await?;
+                    ?;
                 s_p_aj_bit_index_sblocks_file = self
                     .get_file(layer, FILENAMES.pos_s_p_adjacency_list_bit_index_sblocks)
-                    .await?;
+                    ?;
 
                 sp_o_aj_nums_file = self
                     .get_file(layer, FILENAMES.pos_sp_o_adjacency_list_nums)
-                    .await?;
+                    ?;
                 sp_o_aj_bits_file = self
                     .get_file(layer, FILENAMES.pos_sp_o_adjacency_list_bits)
-                    .await?;
+                    ?;
                 sp_o_aj_bit_index_blocks_file = self
                     .get_file(layer, FILENAMES.pos_sp_o_adjacency_list_bit_index_blocks)
-                    .await?;
+                    ?;
                 sp_o_aj_bit_index_sblocks_file = self
                     .get_file(layer, FILENAMES.pos_sp_o_adjacency_list_bit_index_sblocks)
-                    .await?;
+                    ?;
 
-                subjects_file = self.get_file(layer, FILENAMES.pos_subjects).await?;
+                subjects_file = self.get_file(layer, FILENAMES.pos_subjects)?;
             } else {
                 // this is a base layer
                 s_p_aj_nums_file = self
                     .get_file(layer, FILENAMES.base_s_p_adjacency_list_nums)
-                    .await?;
+                    ?;
                 s_p_aj_bits_file = self
                     .get_file(layer, FILENAMES.base_s_p_adjacency_list_bits)
-                    .await?;
+                    ?;
                 s_p_aj_bit_index_blocks_file = self
                     .get_file(layer, FILENAMES.base_s_p_adjacency_list_bit_index_blocks)
-                    .await?;
+                    ?;
                 s_p_aj_bit_index_sblocks_file = self
                     .get_file(layer, FILENAMES.base_s_p_adjacency_list_bit_index_sblocks)
-                    .await?;
+                    ?;
 
                 sp_o_aj_nums_file = self
                     .get_file(layer, FILENAMES.base_sp_o_adjacency_list_nums)
-                    .await?;
+                    ?;
                 sp_o_aj_bits_file = self
                     .get_file(layer, FILENAMES.base_sp_o_adjacency_list_bits)
-                    .await?;
+                    ?;
                 sp_o_aj_bit_index_blocks_file = self
                     .get_file(layer, FILENAMES.base_sp_o_adjacency_list_bit_index_blocks)
-                    .await?;
+                    ?;
                 sp_o_aj_bit_index_sblocks_file = self
                     .get_file(layer, FILENAMES.base_sp_o_adjacency_list_bit_index_sblocks)
-                    .await?;
+                    ?;
 
-                subjects_file = self.get_file(layer, FILENAMES.base_subjects).await?;
+                subjects_file = self.get_file(layer, FILENAMES.base_subjects)?;
             }
 
             let s_p_aj_files = AdjacencyListFiles {
@@ -966,7 +962,7 @@ pub trait PersistentLayerStore: 'static + Send + Sync + Clone {
         }
     }
 
-    async fn triple_removal_files(
+    fn triple_removal_files(
         &self,
         layer: [u32; 5],
     ) -> io::Result<
@@ -977,8 +973,8 @@ pub trait PersistentLayerStore: 'static + Send + Sync + Clone {
         )>,
     > {
         // does layer exist?
-        if self.directory_exists(layer).await? {
-            if self.layer_has_parent(layer).await? {
+        if self.directory_exists(layer)? {
+            if self.layer_has_parent(layer)? {
                 let (
                     s_p_aj_nums_file,
                     s_p_aj_bits_file,
@@ -995,31 +991,31 @@ pub trait PersistentLayerStore: 'static + Send + Sync + Clone {
 
                 s_p_aj_nums_file = self
                     .get_file(layer, FILENAMES.neg_s_p_adjacency_list_nums)
-                    .await?;
+                    ?;
                 s_p_aj_bits_file = self
                     .get_file(layer, FILENAMES.neg_s_p_adjacency_list_bits)
-                    .await?;
+                    ?;
                 s_p_aj_bit_index_blocks_file = self
                     .get_file(layer, FILENAMES.neg_s_p_adjacency_list_bit_index_blocks)
-                    .await?;
+                    ?;
                 s_p_aj_bit_index_sblocks_file = self
                     .get_file(layer, FILENAMES.neg_s_p_adjacency_list_bit_index_sblocks)
-                    .await?;
+                    ?;
 
                 sp_o_aj_nums_file = self
                     .get_file(layer, FILENAMES.neg_sp_o_adjacency_list_nums)
-                    .await?;
+                    ?;
                 sp_o_aj_bits_file = self
                     .get_file(layer, FILENAMES.neg_sp_o_adjacency_list_bits)
-                    .await?;
+                    ?;
                 sp_o_aj_bit_index_blocks_file = self
                     .get_file(layer, FILENAMES.neg_sp_o_adjacency_list_bit_index_blocks)
-                    .await?;
+                    ?;
                 sp_o_aj_bit_index_sblocks_file = self
                     .get_file(layer, FILENAMES.neg_sp_o_adjacency_list_bit_index_sblocks)
-                    .await?;
+                    ?;
 
-                subjects_file = self.get_file(layer, FILENAMES.neg_subjects).await?;
+                subjects_file = self.get_file(layer, FILENAMES.neg_subjects)?;
                 let s_p_aj_files = AdjacencyListFiles {
                     bitindex_files: BitIndexFiles {
                         bits_file: s_p_aj_bits_file,
@@ -1047,44 +1043,44 @@ pub trait PersistentLayerStore: 'static + Send + Sync + Clone {
         }
     }
 
-    async fn predicate_wavelet_addition_files(
+    fn predicate_wavelet_addition_files(
         &self,
         layer: [u32; 5],
     ) -> io::Result<BitIndexFiles<Self::File>> {
         // does layer exist?
-        if self.directory_exists(layer).await? {
+        if self.directory_exists(layer)? {
             let (wavelet_bits_file, wavelet_bit_index_blocks_file, wavelet_bit_index_sblocks_file);
-            if self.layer_has_parent(layer).await? {
+            if self.layer_has_parent(layer)? {
                 // this is a child layer
                 wavelet_bits_file = self
                     .get_file(layer, FILENAMES.pos_predicate_wavelet_tree_bits)
-                    .await?;
+                    ?;
                 wavelet_bit_index_blocks_file = self
                     .get_file(layer, FILENAMES.pos_predicate_wavelet_tree_bit_index_blocks)
-                    .await?;
+                    ?;
                 wavelet_bit_index_sblocks_file = self
                     .get_file(
                         layer,
                         FILENAMES.pos_predicate_wavelet_tree_bit_index_sblocks,
                     )
-                    .await?;
+                    ?;
             } else {
                 // this is a base layer
                 wavelet_bits_file = self
                     .get_file(layer, FILENAMES.base_predicate_wavelet_tree_bits)
-                    .await?;
+                    ?;
                 wavelet_bit_index_blocks_file = self
                     .get_file(
                         layer,
                         FILENAMES.base_predicate_wavelet_tree_bit_index_blocks,
                     )
-                    .await?;
+                    ?;
                 wavelet_bit_index_sblocks_file = self
                     .get_file(
                         layer,
                         FILENAMES.base_predicate_wavelet_tree_bit_index_sblocks,
                     )
-                    .await?;
+                    ?;
             }
 
             let bitindex_files = BitIndexFiles {
@@ -1098,26 +1094,26 @@ pub trait PersistentLayerStore: 'static + Send + Sync + Clone {
         }
     }
 
-    async fn predicate_wavelet_removal_files(
+    fn predicate_wavelet_removal_files(
         &self,
         layer: [u32; 5],
     ) -> io::Result<Option<BitIndexFiles<Self::File>>> {
         // does layer exist?
-        if self.directory_exists(layer).await? {
-            if self.layer_has_parent(layer).await? {
+        if self.directory_exists(layer)? {
+            if self.layer_has_parent(layer)? {
                 // this is a child layer
                 let wavelet_bits_file = self
                     .get_file(layer, FILENAMES.neg_predicate_wavelet_tree_bits)
-                    .await?;
+                    ?;
                 let wavelet_bit_index_blocks_file = self
                     .get_file(layer, FILENAMES.neg_predicate_wavelet_tree_bit_index_blocks)
-                    .await?;
+                    ?;
                 let wavelet_bit_index_sblocks_file = self
                     .get_file(
                         layer,
                         FILENAMES.neg_predicate_wavelet_tree_bit_index_sblocks,
                     )
-                    .await?;
+                    ?;
                 let bitindex_files = BitIndexFiles {
                     bits_file: wavelet_bits_file,
                     blocks_file: wavelet_bit_index_blocks_file,
@@ -1133,7 +1129,7 @@ pub trait PersistentLayerStore: 'static + Send + Sync + Clone {
         }
     }
 
-    async fn triple_addition_files_by_object(
+    fn triple_addition_files_by_object(
         &self,
         layer: [u32; 5],
     ) -> io::Result<(
@@ -1143,7 +1139,7 @@ pub trait PersistentLayerStore: 'static + Send + Sync + Clone {
         AdjacencyListFiles<Self::File>,
     )> {
         // does layer exist?
-        if self.directory_exists(layer).await? {
+        if self.directory_exists(layer)? {
             let (
                 subjects_file,
                 objects_file,
@@ -1158,66 +1154,66 @@ pub trait PersistentLayerStore: 'static + Send + Sync + Clone {
                 s_p_aj_bit_index_blocks_file,
                 s_p_aj_bit_index_sblocks_file,
             );
-            if self.layer_has_parent(layer).await? {
+            if self.layer_has_parent(layer)? {
                 // this is a child layer
                 o_ps_aj_nums_file = self
                     .get_file(layer, FILENAMES.pos_o_ps_adjacency_list_nums)
-                    .await?;
+                    ?;
                 o_ps_aj_bits_file = self
                     .get_file(layer, FILENAMES.pos_o_ps_adjacency_list_bits)
-                    .await?;
+                    ?;
                 o_ps_aj_bit_index_blocks_file = self
                     .get_file(layer, FILENAMES.pos_o_ps_adjacency_list_bit_index_blocks)
-                    .await?;
+                    ?;
                 o_ps_aj_bit_index_sblocks_file = self
                     .get_file(layer, FILENAMES.pos_o_ps_adjacency_list_bit_index_sblocks)
-                    .await?;
+                    ?;
 
                 s_p_aj_nums_file = self
                     .get_file(layer, FILENAMES.pos_s_p_adjacency_list_nums)
-                    .await?;
+                    ?;
                 s_p_aj_bits_file = self
                     .get_file(layer, FILENAMES.pos_s_p_adjacency_list_bits)
-                    .await?;
+                    ?;
                 s_p_aj_bit_index_blocks_file = self
                     .get_file(layer, FILENAMES.pos_s_p_adjacency_list_bit_index_blocks)
-                    .await?;
+                    ?;
                 s_p_aj_bit_index_sblocks_file = self
                     .get_file(layer, FILENAMES.pos_s_p_adjacency_list_bit_index_sblocks)
-                    .await?;
+                    ?;
 
-                subjects_file = self.get_file(layer, FILENAMES.pos_subjects).await?;
-                objects_file = self.get_file(layer, FILENAMES.pos_objects).await?;
+                subjects_file = self.get_file(layer, FILENAMES.pos_subjects)?;
+                objects_file = self.get_file(layer, FILENAMES.pos_objects)?;
             } else {
                 // this is a base layer
                 o_ps_aj_nums_file = self
                     .get_file(layer, FILENAMES.base_o_ps_adjacency_list_nums)
-                    .await?;
+                    ?;
                 o_ps_aj_bits_file = self
                     .get_file(layer, FILENAMES.base_o_ps_adjacency_list_bits)
-                    .await?;
+                    ?;
                 o_ps_aj_bit_index_blocks_file = self
                     .get_file(layer, FILENAMES.base_o_ps_adjacency_list_bit_index_blocks)
-                    .await?;
+                    ?;
                 o_ps_aj_bit_index_sblocks_file = self
                     .get_file(layer, FILENAMES.base_o_ps_adjacency_list_bit_index_sblocks)
-                    .await?;
+                    ?;
 
                 s_p_aj_nums_file = self
                     .get_file(layer, FILENAMES.base_s_p_adjacency_list_nums)
-                    .await?;
+                    ?;
                 s_p_aj_bits_file = self
                     .get_file(layer, FILENAMES.base_s_p_adjacency_list_bits)
-                    .await?;
+                    ?;
                 s_p_aj_bit_index_blocks_file = self
                     .get_file(layer, FILENAMES.base_s_p_adjacency_list_bit_index_blocks)
-                    .await?;
+                    ?;
                 s_p_aj_bit_index_sblocks_file = self
                     .get_file(layer, FILENAMES.base_s_p_adjacency_list_bit_index_sblocks)
-                    .await?;
+                    ?;
 
-                subjects_file = self.get_file(layer, FILENAMES.base_subjects).await?;
-                objects_file = self.get_file(layer, FILENAMES.base_objects).await?;
+                subjects_file = self.get_file(layer, FILENAMES.base_subjects)?;
+                objects_file = self.get_file(layer, FILENAMES.base_objects)?;
             }
 
             let o_ps_aj_files = AdjacencyListFiles {
@@ -1243,7 +1239,7 @@ pub trait PersistentLayerStore: 'static + Send + Sync + Clone {
         }
     }
 
-    async fn triple_removal_files_by_object(
+    fn triple_removal_files_by_object(
         &self,
         layer: [u32; 5],
     ) -> io::Result<
@@ -1255,37 +1251,37 @@ pub trait PersistentLayerStore: 'static + Send + Sync + Clone {
         )>,
     > {
         // does layer exist?
-        if self.directory_exists(layer).await? {
-            if self.layer_has_parent(layer).await? {
+        if self.directory_exists(layer)? {
+            if self.layer_has_parent(layer)? {
                 // this is a child layer
                 let o_ps_aj_nums_file = self
                     .get_file(layer, FILENAMES.neg_o_ps_adjacency_list_nums)
-                    .await?;
+                    ?;
                 let o_ps_aj_bits_file = self
                     .get_file(layer, FILENAMES.neg_o_ps_adjacency_list_bits)
-                    .await?;
+                    ?;
                 let o_ps_aj_bit_index_blocks_file = self
                     .get_file(layer, FILENAMES.neg_o_ps_adjacency_list_bit_index_blocks)
-                    .await?;
+                    ?;
                 let o_ps_aj_bit_index_sblocks_file = self
                     .get_file(layer, FILENAMES.neg_o_ps_adjacency_list_bit_index_sblocks)
-                    .await?;
+                    ?;
 
                 let s_p_aj_nums_file = self
                     .get_file(layer, FILENAMES.neg_s_p_adjacency_list_nums)
-                    .await?;
+                    ?;
                 let s_p_aj_bits_file = self
                     .get_file(layer, FILENAMES.neg_s_p_adjacency_list_bits)
-                    .await?;
+                    ?;
                 let s_p_aj_bit_index_blocks_file = self
                     .get_file(layer, FILENAMES.neg_s_p_adjacency_list_bit_index_blocks)
-                    .await?;
+                    ?;
                 let s_p_aj_bit_index_sblocks_file = self
                     .get_file(layer, FILENAMES.neg_s_p_adjacency_list_bit_index_sblocks)
-                    .await?;
+                    ?;
 
-                let subjects_file = self.get_file(layer, FILENAMES.neg_subjects).await?;
-                let objects_file = self.get_file(layer, FILENAMES.neg_objects).await?;
+                let subjects_file = self.get_file(layer, FILENAMES.neg_subjects)?;
+                let objects_file = self.get_file(layer, FILENAMES.neg_objects)?;
 
                 let o_ps_aj_files = AdjacencyListFiles {
                     bitindex_files: BitIndexFiles {
@@ -1319,55 +1315,55 @@ pub trait PersistentLayerStore: 'static + Send + Sync + Clone {
         }
     }
 
-    async fn triple_layer_addition_count_files(
+    fn triple_layer_addition_count_files(
         &self,
         layer: [u32; 5],
     ) -> io::Result<(Self::File, Self::File, BitIndexFiles<Self::File>)> {
         // does layer exist?
-        if self.directory_exists(layer).await? {
+        if self.directory_exists(layer)? {
             let (s_p_nums_file, sp_o_bits_file);
-            if self.layer_has_parent(layer).await? {
+            if self.layer_has_parent(layer)? {
                 // this is a child layer
                 s_p_nums_file = self
                     .get_file(layer, FILENAMES.pos_s_p_adjacency_list_nums)
-                    .await?;
+                    ?;
                 sp_o_bits_file = self
                     .get_file(layer, FILENAMES.pos_sp_o_adjacency_list_bits)
-                    .await?;
+                    ?;
             } else {
                 // this is a base layer
                 s_p_nums_file = self
                     .get_file(layer, FILENAMES.base_s_p_adjacency_list_nums)
-                    .await?;
+                    ?;
                 sp_o_bits_file = self
                     .get_file(layer, FILENAMES.base_sp_o_adjacency_list_bits)
-                    .await?;
+                    ?;
             }
 
-            let predicate_wavelet_files = self.predicate_wavelet_addition_files(layer).await?;
+            let predicate_wavelet_files = self.predicate_wavelet_addition_files(layer)?;
             Ok((s_p_nums_file, sp_o_bits_file, predicate_wavelet_files))
         } else {
             Err(io::Error::new(io::ErrorKind::NotFound, "layer not found"))
         }
     }
 
-    async fn triple_layer_removal_count_files(
+    fn triple_layer_removal_count_files(
         &self,
         layer: [u32; 5],
     ) -> io::Result<Option<(Self::File, Self::File, BitIndexFiles<Self::File>)>> {
         // does layer exist?
-        if self.directory_exists(layer).await? {
-            if self.layer_has_parent(layer).await? {
+        if self.directory_exists(layer)? {
+            if self.layer_has_parent(layer)? {
                 // this is a child layer
                 let s_p_nums_file = self
                     .get_file(layer, FILENAMES.neg_s_p_adjacency_list_nums)
-                    .await?;
+                    ?;
                 let sp_o_bits_file = self
                     .get_file(layer, FILENAMES.neg_sp_o_adjacency_list_bits)
-                    .await?;
+                    ?;
                 let predicate_wavelet_files = self
                     .predicate_wavelet_removal_files(layer)
-                    .await?
+                    ?
                     .expect("expected wavelet removal files to exist");
                 Ok(Some((
                     s_p_nums_file,
@@ -1422,15 +1418,14 @@ pub fn bytes_to_name(bytes: &[u8]) -> Result<[u32; 5], std::io::Error> {
     }
 }
 
-#[async_trait]
 impl<F: 'static + FileLoad + FileStore + Clone, T: 'static + PersistentLayerStore<File = F>>
     LayerStore for T
 {
-    async fn layers(&self) -> io::Result<Vec<[u32; 5]>> {
-        self.directories().await
+    fn layers(&self) -> io::Result<Vec<[u32; 5]>> {
+        self.directories()
     }
 
-    async fn get_layer_with_cache(
+    fn get_layer_with_cache(
         &self,
         name: [u32; 5],
         cache: Arc<dyn LayerCache>,
@@ -1442,7 +1437,7 @@ impl<F: 'static + FileLoad + FileStore + Clone, T: 'static + PersistentLayerStor
         let mut layers_to_load: Vec<([u32; 5], Option<([u32; 5], Option<[u32; 5]>)>)> =
             vec![(name, None)];
 
-        if !self.directory_exists(name).await? {
+        if !self.directory_exists(name)? {
             return Ok(None);
         }
 
@@ -1489,23 +1484,23 @@ impl<F: 'static + FileLoad + FileStore + Clone, T: 'static + PersistentLayerStor
                     break;
                 }
                 None => {
-                    if self.layer_has_rollup(current_layer).await? {
-                        let rollup = self.read_rollup_file(current_layer).await?;
+                    if self.layer_has_rollup(current_layer)? {
+                        let rollup = self.read_rollup_file(current_layer)?;
                         if rollup == current_layer {
                             panic!("infinite rollup loop for layer {:?}", rollup);
                         }
 
                         let original_parent;
-                        if self.layer_has_parent(current_layer).await? {
-                            original_parent = Some(self.read_parent_file(current_layer).await?);
+                        if self.layer_has_parent(current_layer)? {
+                            original_parent = Some(self.read_parent_file(current_layer)?);
                         } else {
                             original_parent = None;
                         }
 
                         layers_to_load.pop().unwrap(); // we don't want to load this, we want to load the rollup instead!
                         layers_to_load.push((current_layer, Some((rollup, original_parent))));
-                    } else if self.layer_has_parent(current_layer).await? {
-                        let parent = self.read_parent_file(current_layer).await?;
+                    } else if self.layer_has_parent(current_layer)? {
+                        let parent = self.read_parent_file(current_layer)?;
                         layers_to_load.push((parent, None));
                     } else {
                         break;
@@ -1520,15 +1515,15 @@ impl<F: 'static + FileLoad + FileStore + Clone, T: 'static + PersistentLayerStor
             let layer: Arc<InternalLayer>;
             match rollup {
                 None => {
-                    let files = self.base_layer_files(base_id).await?;
-                    let base_layer = BaseLayer::load_from_files(base_id, &files).await?;
+                    let files = self.base_layer_files(base_id)?;
+                    let base_layer = BaseLayer::load_from_files(base_id, &files)?;
 
                     layer = Arc::new(base_layer.into());
                 }
                 Some((rollup_id, original_parent_id_option)) => {
-                    let files = self.base_layer_files(rollup_id).await?;
+                    let files = self.base_layer_files(rollup_id)?;
                     let base_layer: Arc<InternalLayer> =
-                        Arc::new(BaseLayer::load_from_files(rollup_id, &files).await?.into());
+                        Arc::new(BaseLayer::load_from_files(rollup_id, &files)?.into());
                     cache.cache_layer(base_layer.clone());
 
                     layer = Arc::new(
@@ -1553,19 +1548,19 @@ impl<F: 'static + FileLoad + FileStore + Clone, T: 'static + PersistentLayerStor
             let layer: Arc<InternalLayer>;
             match rollup {
                 None => {
-                    let files = self.child_layer_files(layer_id).await?;
+                    let files = self.child_layer_files(layer_id)?;
                     let child_layer =
-                        ChildLayer::load_from_files(layer_id, ancestor, &files).await?;
+                        ChildLayer::load_from_files(layer_id, ancestor, &files)?;
                     layer = Arc::new(child_layer.into());
                 }
                 Some((rollup_id, original_parent_id_option)) => {
                     let original_parent_id = original_parent_id_option
                         .expect("child rollup layer should always have original parent id");
 
-                    let files = self.child_layer_files(rollup_id).await?;
+                    let files = self.child_layer_files(rollup_id)?;
                     let child_layer: Arc<InternalLayer> = Arc::new(
                         ChildLayer::load_from_files(rollup_id, ancestor, &files)
-                            .await?
+                            ?
                             .into(),
                     );
                     cache.cache_layer(child_layer.clone());
@@ -1586,18 +1581,18 @@ impl<F: 'static + FileLoad + FileStore + Clone, T: 'static + PersistentLayerStor
         Ok(Some(ancestor))
     }
 
-    async fn finalize_layer(&self, name: [u32; 5]) -> io::Result<()> {
-        self.finalize(name).await
+    fn finalize_layer(&self, name: [u32; 5]) -> io::Result<()> {
+        self.finalize(name)
     }
 
-    async fn get_layer_parent_name(&self, name: [u32; 5]) -> io::Result<Option<[u32; 5]>> {
-        self.layer_parent(name).await
+    fn get_layer_parent_name(&self, name: [u32; 5]) -> io::Result<Option<[u32; 5]>> {
+        self.layer_parent(name)
     }
 
-    async fn get_node_dictionary(&self, name: [u32; 5]) -> io::Result<Option<StringDict>> {
-        if self.directory_exists(name).await? {
-            let files = self.node_dictionary_files(name).await?;
-            let maps = files.map_all().await?;
+    fn get_node_dictionary(&self, name: [u32; 5]) -> io::Result<Option<StringDict>> {
+        if self.directory_exists(name)? {
+            let files = self.node_dictionary_files(name)?;
+            let maps = files.map_all()?;
 
             Ok(Some(StringDict::parse(maps.offsets_map, maps.blocks_map)))
         } else {
@@ -1605,10 +1600,10 @@ impl<F: 'static + FileLoad + FileStore + Clone, T: 'static + PersistentLayerStor
         }
     }
 
-    async fn get_predicate_dictionary(&self, name: [u32; 5]) -> io::Result<Option<StringDict>> {
-        if self.directory_exists(name).await? {
-            let files = self.predicate_dictionary_files(name).await?;
-            let maps = files.map_all().await?;
+    fn get_predicate_dictionary(&self, name: [u32; 5]) -> io::Result<Option<StringDict>> {
+        if self.directory_exists(name)? {
+            let files = self.predicate_dictionary_files(name)?;
+            let maps = files.map_all()?;
 
             Ok(Some(StringDict::parse(maps.offsets_map, maps.blocks_map)))
         } else {
@@ -1616,10 +1611,10 @@ impl<F: 'static + FileLoad + FileStore + Clone, T: 'static + PersistentLayerStor
         }
     }
 
-    async fn get_value_dictionary(&self, name: [u32; 5]) -> io::Result<Option<TypedDict>> {
-        if self.directory_exists(name).await? {
-            let files = self.value_dictionary_files(name).await?;
-            let maps = files.map_all().await?;
+    fn get_value_dictionary(&self, name: [u32; 5]) -> io::Result<Option<TypedDict>> {
+        if self.directory_exists(name)? {
+            let files = self.value_dictionary_files(name)?;
+            let maps = files.map_all()?;
 
             Ok(Some(TypedDict::from_parts(
                 maps.types_present_map,
@@ -1632,40 +1627,40 @@ impl<F: 'static + FileLoad + FileStore + Clone, T: 'static + PersistentLayerStor
         }
     }
 
-    async fn get_node_count(&self, name: [u32; 5]) -> io::Result<Option<u64>> {
-        if self.directory_exists(name).await? {
-            let file = self.node_dictionary_files(name).await?.blocks_file;
-            Ok(Some(dict_file_get_count(file).await?))
+    fn get_node_count(&self, name: [u32; 5]) -> io::Result<Option<u64>> {
+        if self.directory_exists(name)? {
+            let file = self.node_dictionary_files(name)?.blocks_file;
+            Ok(Some(dict_file_get_count(&file)?))
         } else {
             Ok(None)
         }
     }
 
-    async fn get_predicate_count(&self, name: [u32; 5]) -> io::Result<Option<u64>> {
-        if self.directory_exists(name).await? {
-            let file = self.predicate_dictionary_files(name).await?.blocks_file;
-            Ok(Some(dict_file_get_count(file).await?))
+    fn get_predicate_count(&self, name: [u32; 5]) -> io::Result<Option<u64>> {
+        if self.directory_exists(name)? {
+            let file = self.predicate_dictionary_files(name)?.blocks_file;
+            Ok(Some(dict_file_get_count(&file)?))
         } else {
             Ok(None)
         }
     }
 
-    async fn get_value_count(&self, name: [u32; 5]) -> io::Result<Option<u64>> {
-        if self.directory_exists(name).await? {
-            let file = self.value_dictionary_files(name).await?.blocks_file;
-            Ok(Some(dict_file_get_count(file).await?))
+    fn get_value_count(&self, name: [u32; 5]) -> io::Result<Option<u64>> {
+        if self.directory_exists(name)? {
+            let file = self.value_dictionary_files(name)?.blocks_file;
+            Ok(Some(dict_file_get_count(&file)?))
         } else {
             Ok(None)
         }
     }
 
-    async fn get_node_value_idmap(&self, name: [u32; 5]) -> io::Result<Option<IdMap>> {
-        if self.directory_exists(name).await? {
-            let size = self.get_node_count(name).await?.unwrap()
-                + self.get_value_count(name).await?.unwrap();
+    fn get_node_value_idmap(&self, name: [u32; 5]) -> io::Result<Option<IdMap>> {
+        if self.directory_exists(name)? {
+            let size = self.get_node_count(name)?.unwrap()
+                + self.get_value_count(name)?.unwrap();
             let width = util::calculate_width(size);
-            let files = self.node_value_idmap_files(name).await?;
-            let maps = files.map_all_if_exists().await?;
+            let files = self.node_value_idmap_files(name)?;
+            let maps = files.map_all_if_exists()?;
 
             let wtree = maps.map(|m| {
                 WaveletTree::from_parts(
@@ -1681,12 +1676,12 @@ impl<F: 'static + FileLoad + FileStore + Clone, T: 'static + PersistentLayerStor
         }
     }
 
-    async fn get_predicate_idmap(&self, name: [u32; 5]) -> io::Result<Option<IdMap>> {
-        if self.directory_exists(name).await? {
-            let size = self.get_predicate_count(name).await?.unwrap();
+    fn get_predicate_idmap(&self, name: [u32; 5]) -> io::Result<Option<IdMap>> {
+        if self.directory_exists(name)? {
+            let size = self.get_predicate_count(name)?.unwrap();
             let width = util::calculate_width(size);
-            let files = self.predicate_idmap_files(name).await?;
-            let maps = files.map_all_if_exists().await?;
+            let files = self.predicate_idmap_files(name)?;
+            let maps = files.map_all_if_exists()?;
 
             let wtree = maps.map(|m| {
                 WaveletTree::from_parts(
@@ -1702,20 +1697,20 @@ impl<F: 'static + FileLoad + FileStore + Clone, T: 'static + PersistentLayerStor
         }
     }
 
-    async fn create_base_layer(&self) -> io::Result<Box<dyn LayerBuilder>> {
-        let dir_name = self.create_directory().await?;
-        let files = self.base_layer_files(dir_name).await?;
+    fn create_base_layer(&self) -> io::Result<Box<dyn LayerBuilder>> {
+        let dir_name = self.create_directory()?;
+        let files = self.base_layer_files(dir_name)?;
         Ok(Box::new(SimpleLayerBuilder::new(dir_name, files)) as Box<dyn LayerBuilder>)
     }
 
-    async fn create_child_layer_with_cache(
+    fn create_child_layer_with_cache(
         &self,
         parent: [u32; 5],
         cache: Arc<dyn LayerCache>,
     ) -> io::Result<Box<dyn LayerBuilder>> {
         let (layer_dir, parent_layer, child_layer_files) = self
             .create_child_layer_files_with_cache(parent, cache)
-            .await?;
+            ?;
 
         Ok(Box::new(SimpleLayerBuilder::from_parent(
             layer_dir,
@@ -1724,7 +1719,7 @@ impl<F: 'static + FileLoad + FileStore + Clone, T: 'static + PersistentLayerStor
         )) as Box<dyn LayerBuilder>)
     }
 
-    async fn perform_rollup(&self, layer: Arc<InternalLayer>) -> io::Result<[u32; 5]> {
+    fn perform_rollup(&self, layer: Arc<InternalLayer>) -> io::Result<[u32; 5]> {
         if layer.parent_name().is_none() {
             // we're already a base layer. there's nothing that can be rolled up.
             // returning our own name will inhibit writing a rollup file.
@@ -1732,24 +1727,24 @@ impl<F: 'static + FileLoad + FileStore + Clone, T: 'static + PersistentLayerStor
         }
 
         // check if there's already an equivalent rollup
-        if self.layer_has_rollup(layer.name()).await? {
-            let rollup = self.read_rollup_file(layer.name()).await?;
+        if self.layer_has_rollup(layer.name())? {
+            let rollup = self.read_rollup_file(layer.name())?;
             // the rollup is equivalent if it is a base layer
-            if !self.layer_has_parent(rollup).await? {
+            if !self.layer_has_parent(rollup)? {
                 // yup, equivalent. let's just return the rollup we know about.
                 return Ok(rollup);
             }
         }
 
-        let dir_name = self.create_directory().await?;
-        let files = self.base_layer_files(dir_name).await?;
-        delta_rollup(&layer, files).await?;
-        self.finalize(dir_name).await?;
+        let dir_name = self.create_directory()?;
+        let files = self.base_layer_files(dir_name)?;
+        delta_rollup(&layer, files)?;
+        self.finalize(dir_name)?;
 
         Ok(dir_name)
     }
 
-    async fn perform_rollup_upto_with_cache(
+    fn perform_rollup_upto_with_cache(
         &self,
         layer: Arc<InternalLayer>,
         upto: [u32; 5],
@@ -1766,11 +1761,11 @@ impl<F: 'static + FileLoad + FileStore + Clone, T: 'static + PersistentLayerStor
         }
 
         // check if there's already an equivalent rollup
-        if self.layer_has_rollup(layer.name()).await? {
-            let rollup = self.read_rollup_file(layer.name()).await?;
+        if self.layer_has_rollup(layer.name())? {
+            let rollup = self.read_rollup_file(layer.name())?;
 
             // get rollup parent. if it is the same as upto, we're requesting something equivalent.
-            if upto == self.read_parent_file(rollup).await? {
+            if upto == self.read_parent_file(rollup)? {
                 // yup, equivalent. Let's just return the rollup we know about.
                 return Ok(rollup);
             }
@@ -1778,13 +1773,13 @@ impl<F: 'static + FileLoad + FileStore + Clone, T: 'static + PersistentLayerStor
 
         let (layer_dir, _parent_layer, child_layer_files) = self
             .create_child_layer_files_with_cache(upto, cache)
-            .await?;
-        delta_rollup_upto(self, &layer, upto, child_layer_files).await?;
-        self.finalize(layer_dir).await?;
+            ?;
+        delta_rollup_upto(self, &layer, upto, child_layer_files)?;
+        self.finalize(layer_dir)?;
         Ok(layer_dir)
     }
 
-    async fn perform_imprecise_rollup_upto_with_cache(
+    fn perform_imprecise_rollup_upto_with_cache(
         &self,
         layer: Arc<InternalLayer>,
         upto: [u32; 5],
@@ -1801,11 +1796,11 @@ impl<F: 'static + FileLoad + FileStore + Clone, T: 'static + PersistentLayerStor
         }
 
         // check if there's already an equivalent rollup
-        if self.layer_has_rollup(layer.name()).await? {
-            let rollup = self.read_rollup_file(layer.name()).await?;
+        if self.layer_has_rollup(layer.name())? {
+            let rollup = self.read_rollup_file(layer.name())?;
 
             // get rollup parent. if it is the same as upto, we're requesting something equivalent.
-            if upto == self.read_parent_file(rollup).await? {
+            if upto == self.read_parent_file(rollup)? {
                 // yup, equivalent. Let's just return the rollup we know about.
                 return Ok(rollup);
             }
@@ -1813,22 +1808,22 @@ impl<F: 'static + FileLoad + FileStore + Clone, T: 'static + PersistentLayerStor
 
         let (layer_dir, _parent_layer, child_layer_files) = self
             .create_child_layer_files_with_cache(upto, cache)
-            .await?;
-        imprecise_delta_rollup_upto(self, &layer, upto, child_layer_files).await?;
-        self.finalize(layer_dir).await?;
+            ?;
+        imprecise_delta_rollup_upto(self, &layer, upto, child_layer_files)?;
+        self.finalize(layer_dir)?;
         Ok(layer_dir)
     }
 
-    async fn register_rollup(&self, layer: [u32; 5], rollup: [u32; 5]) -> io::Result<()> {
+    fn register_rollup(&self, layer: [u32; 5], rollup: [u32; 5]) -> io::Result<()> {
         if layer == rollup {
             // let's not create a loop
             Ok(())
         } else {
-            self.write_rollup_file(layer, rollup).await
+            self.write_rollup_file(layer, rollup)
         }
     }
 
-    async fn squash(&self, layer: Arc<InternalLayer>) -> io::Result<[u32; 5]> {
+    fn squash(&self, layer: Arc<InternalLayer>) -> io::Result<[u32; 5]> {
         // we create a new base layer
         // we then build a new set of dictionaries by sorting what we got in all layers
         // keep track of how the ids move so we have a mapping
@@ -1935,13 +1930,13 @@ impl<F: 'static + FileLoad + FileStore + Clone, T: 'static + PersistentLayerStor
             pred_map[*old as usize] = remapped as u64 + 1;
         }
 
-        let layer_name = self.create_directory().await?;
-        let base_layer_files = self.base_layer_files(layer_name).await?;
-        let mut builder = BaseLayerFileBuilder::from_files(&base_layer_files).await?;
+        let layer_name = self.create_directory()?;
+        let base_layer_files = self.base_layer_files(layer_name)?;
+        let mut builder = BaseLayerFileBuilder::from_files(&base_layer_files)?;
         builder.add_nodes_bytes(nodes.into_iter().map(|(x, _)| x.to_bytes()));
         builder.add_predicates_bytes(predicates.into_iter().map(|(x, _)| x.to_bytes()));
         builder.add_values(values.into_iter().map(|(x, _)| x));
-        let mut builder = builder.into_phase2().await?;
+        let mut builder = builder.into_phase2()?;
         let mut triples = Vec::with_capacity(num_triples);
         triples.extend(layer.triples().map(move |t| {
             IdTriple::new(
@@ -1952,37 +1947,37 @@ impl<F: 'static + FileLoad + FileStore + Clone, T: 'static + PersistentLayerStor
         }));
         triples.sort();
 
-        builder.add_id_triples(triples.into_iter()).await?;
-        builder.finalize().await?;
+        builder.add_id_triples(triples.into_iter())?;
+        builder.finalize()?;
 
-        self.finalize_layer(layer_name).await?;
+        self.finalize_layer(layer_name)?;
 
         Ok(layer_name)
     }
 
-    async fn squash_upto(&self, layer: Arc<InternalLayer>, upto: [u32; 5]) -> io::Result<[u32; 5]> {
+    fn squash_upto(&self, layer: Arc<InternalLayer>, upto: [u32; 5]) -> io::Result<[u32; 5]> {
         let mut base_node_count = 0;
         let mut base_pred_count = 0;
         let mut base_value_count = 0;
         walk_backwards_from_disk!(self, upto, current, {
-            base_node_count += self.get_node_count(current).await?.unwrap_or(0) as u64;
-            base_value_count += self.get_value_count(current).await?.unwrap_or(0) as u64;
-            base_pred_count += self.get_predicate_count(current).await?.unwrap_or(0) as u64;
+            base_node_count += self.get_node_count(current)?.unwrap_or(0) as u64;
+            base_value_count += self.get_value_count(current)?.unwrap_or(0) as u64;
+            base_pred_count += self.get_predicate_count(current)?.unwrap_or(0) as u64;
         });
         let base_node_value_count = base_node_count + base_value_count;
         let mut node_value_count = base_node_value_count;
         let mut pred_count = base_pred_count;
         let stack_names = self
             .retrieve_layer_stack_names_upto(layer.name(), upto)
-            .await?;
+            ?;
 
         let mut structures = Vec::with_capacity(stack_names.len());
         for layer_name in stack_names {
-            let node_dict = self.get_node_dictionary(layer_name).await?;
-            let predicate_dict = self.get_predicate_dictionary(layer_name).await?;
-            let value_dict = self.get_value_dictionary(layer_name).await?;
-            let node_value_id_map = self.get_node_value_idmap(layer_name).await?;
-            let predicate_id_map = self.get_predicate_idmap(layer_name).await?;
+            let node_dict = self.get_node_dictionary(layer_name)?;
+            let predicate_dict = self.get_predicate_dictionary(layer_name)?;
+            let value_dict = self.get_value_dictionary(layer_name)?;
+            let node_value_id_map = self.get_node_value_idmap(layer_name)?;
+            let predicate_id_map = self.get_predicate_idmap(layer_name)?;
 
             structures.push((
                 node_dict,
@@ -2011,7 +2006,7 @@ impl<F: 'static + FileLoad + FileStore + Clone, T: 'static + PersistentLayerStor
         let mut node_value_existences = bitvec![0;stack_node_value_count as usize+1];
         let mut predicate_existences = bitvec![0;stack_pred_count as usize+1];
         let mut num_triple_changes = 0;
-        let layer_changes_upto = self.layer_changes_upto(layer.name(), upto).await?;
+        let layer_changes_upto = self.layer_changes_upto(layer.name(), upto)?;
         for (change_type, triple) in layer_changes_upto.clone() {
             num_triple_changes += 1;
             if change_type == TripleChange::Removal {
@@ -2111,20 +2106,20 @@ impl<F: 'static + FileLoad + FileStore + Clone, T: 'static + PersistentLayerStor
         let predicate_count = predicates.len();
         let value_count = values.len();
 
-        let upto_layer = self.get_layer(upto).await?.expect("expected upto to exist");
-        let layer_name = self.create_directory().await?;
-        let child_layer_files = self.child_layer_files(layer_name).await?;
+        let upto_layer = self.get_layer(upto)?.expect("expected upto to exist");
+        let layer_name = self.create_directory()?;
+        let child_layer_files = self.child_layer_files(layer_name)?;
         let mut builder = DictionarySetFileBuilder::from_files(
             child_layer_files.node_dictionary_files.clone(),
             child_layer_files.predicate_dictionary_files.clone(),
             child_layer_files.value_dictionary_files.clone(),
         )
-        .await?;
+        ?;
 
         builder.add_nodes_bytes(nodes.into_iter().map(|(x, _)| x.to_bytes()));
         builder.add_predicates_bytes(predicates.into_iter().map(|(x, _)| x.to_bytes()));
         builder.add_values(values.into_iter().map(|(x, _)| x));
-        builder.finalize().await?;
+        builder.finalize()?;
 
         // TODO use more inner stuff to avoid parent checks as they are unnecessary here
         let mut builder = ChildLayerFileBuilderPhase2::new(
@@ -2134,7 +2129,7 @@ impl<F: 'static + FileLoad + FileStore + Clone, T: 'static + PersistentLayerStor
             predicate_count,
             value_count,
         )
-        .await?;
+        ?;
         let mut triple_changes = Vec::with_capacity(num_triple_changes);
         for (change_type, t) in layer_changes_upto {
             let mapped_subject = if t.subject <= base_node_value_count {
@@ -2167,7 +2162,7 @@ impl<F: 'static + FileLoad + FileStore + Clone, T: 'static + PersistentLayerStor
                             mapped_triple.predicate,
                             mapped_triple.object,
                         )
-                        .await?
+                        ?
                 }
                 TripleChange::Removal => {
                     builder
@@ -2176,25 +2171,25 @@ impl<F: 'static + FileLoad + FileStore + Clone, T: 'static + PersistentLayerStor
                             mapped_triple.predicate,
                             mapped_triple.object,
                         )
-                        .await?
+                        ?
                 }
             }
         }
-        builder.finalize().await?;
-        self.write_parent_file(layer_name, upto).await?;
-        self.finalize_layer(layer_name).await?;
+        builder.finalize()?;
+        self.write_parent_file(layer_name, upto)?;
+        self.finalize_layer(layer_name)?;
 
         Ok(layer_name)
     }
 
-    async fn merge_base_layer(
+    fn merge_base_layer(
         &self,
         layers: &[[u32; 5]],
         temp_path: &Path,
     ) -> io::Result<[u32; 5]> {
         let mut layer_files = Vec::with_capacity(layers.len());
         for layer in layers {
-            if self.layer_has_parent(*layer).await? {
+            if self.layer_has_parent(*layer)? {
                 return Err(io::Error::new(
                     io::ErrorKind::Other,
                     format!(
@@ -2203,20 +2198,20 @@ impl<F: 'static + FileLoad + FileStore + Clone, T: 'static + PersistentLayerStor
                     ),
                 ));
             }
-            layer_files.push(self.base_layer_files(*layer).await?);
+            layer_files.push(self.base_layer_files(*layer)?);
         }
 
-        let output_name = self.create_directory().await?;
-        let output_layer_files = self.base_layer_files(output_name).await?;
+        let output_name = self.create_directory()?;
+        let output_layer_files = self.base_layer_files(output_name)?;
 
-        merge_base_layers(&layer_files, output_layer_files, temp_path).await?;
+        merge_base_layers(&layer_files, output_layer_files, temp_path)?;
 
-        self.finalize(output_name).await?;
+        self.finalize(output_name)?;
 
         Ok(output_name)
     }
 
-    async fn layer_is_ancestor_of(
+    fn layer_is_ancestor_of(
         &self,
         mut descendant: [u32; 5],
         ancestor: [u32; 5],
@@ -2226,8 +2221,8 @@ impl<F: 'static + FileLoad + FileStore + Clone, T: 'static + PersistentLayerStor
                 return Ok(true);
             }
 
-            if self.layer_has_parent(descendant).await? {
-                let parent = self.read_parent_file(descendant).await?;
+            if self.layer_has_parent(descendant)? {
+                let parent = self.read_parent_file(descendant)?;
                 descendant = parent;
             } else {
                 return Ok(false);
@@ -2235,7 +2230,7 @@ impl<F: 'static + FileLoad + FileStore + Clone, T: 'static + PersistentLayerStor
         }
     }
 
-    async fn triple_addition_exists(
+    fn triple_addition_exists(
         &self,
         layer: [u32; 5],
         subject: u64,
@@ -2243,7 +2238,7 @@ impl<F: 'static + FileLoad + FileStore + Clone, T: 'static + PersistentLayerStor
         object: u64,
     ) -> io::Result<bool> {
         let (subjects_file, s_p_aj_files, sp_o_aj_files) =
-            self.triple_addition_files(layer).await?;
+            self.triple_addition_files(layer)?;
 
         file_triple_exists(
             subjects_file,
@@ -2253,10 +2248,10 @@ impl<F: 'static + FileLoad + FileStore + Clone, T: 'static + PersistentLayerStor
             predicate,
             object,
         )
-        .await
+        
     }
 
-    async fn triple_removal_exists(
+    fn triple_removal_exists(
         &self,
         layer: [u32; 5],
         subject: u64,
@@ -2264,7 +2259,7 @@ impl<F: 'static + FileLoad + FileStore + Clone, T: 'static + PersistentLayerStor
         object: u64,
     ) -> io::Result<bool> {
         if let Some((subjects_file, s_p_aj_files, sp_o_aj_files)) =
-            self.triple_removal_files(layer).await?
+            self.triple_removal_files(layer)?
         {
             file_triple_exists(
                 subjects_file,
@@ -2274,66 +2269,66 @@ impl<F: 'static + FileLoad + FileStore + Clone, T: 'static + PersistentLayerStor
                 predicate,
                 object,
             )
-            .await
+            
         } else {
             Ok(false)
         }
     }
 
-    async fn triple_additions(
+    fn triple_additions(
         &self,
         layer: [u32; 5],
     ) -> io::Result<OptInternalLayerTripleSubjectIterator> {
         let (subjects_file, s_p_aj_files, sp_o_aj_files) =
-            self.triple_addition_files(layer).await?;
+            self.triple_addition_files(layer)?;
 
         Ok(OptInternalLayerTripleSubjectIterator(Some(
-            file_triple_iterator(subjects_file, s_p_aj_files, sp_o_aj_files).await?,
+            file_triple_iterator(subjects_file, s_p_aj_files, sp_o_aj_files)?,
         )))
     }
 
-    async fn triple_removals(
+    fn triple_removals(
         &self,
         layer: [u32; 5],
     ) -> io::Result<OptInternalLayerTripleSubjectIterator> {
         if let Some((subjects_file, s_p_aj_files, sp_o_aj_files)) =
-            self.triple_removal_files(layer).await?
+            self.triple_removal_files(layer)?
         {
             Ok(OptInternalLayerTripleSubjectIterator(Some(
-                file_triple_iterator(subjects_file, s_p_aj_files, sp_o_aj_files).await?,
+                file_triple_iterator(subjects_file, s_p_aj_files, sp_o_aj_files)?,
             )))
         } else {
             Ok(OptInternalLayerTripleSubjectIterator(None))
         }
     }
 
-    async fn triple_additions_s(
+    fn triple_additions_s(
         &self,
         layer: [u32; 5],
         subject: u64,
     ) -> io::Result<Box<dyn Iterator<Item = IdTriple> + Send>> {
         let (subjects_file, s_p_aj_files, sp_o_aj_files) =
-            self.triple_addition_files(layer).await?;
+            self.triple_addition_files(layer)?;
 
         Ok(Box::new(
             file_triple_iterator(subjects_file, s_p_aj_files, sp_o_aj_files)
-                .await?
+                ?
                 .seek_subject(subject)
                 .take_while(move |t| t.subject == subject),
         ) as Box<dyn Iterator<Item = _> + Send>)
     }
 
-    async fn triple_removals_s(
+    fn triple_removals_s(
         &self,
         layer: [u32; 5],
         subject: u64,
     ) -> io::Result<Box<dyn Iterator<Item = IdTriple> + Send>> {
         if let Some((subjects_file, s_p_aj_files, sp_o_aj_files)) =
-            self.triple_removal_files(layer).await?
+            self.triple_removal_files(layer)?
         {
             Ok(Box::new(
                 file_triple_iterator(subjects_file, s_p_aj_files, sp_o_aj_files)
-                    .await?
+                    ?
                     .seek_subject(subject)
                     .take_while(move |t| t.subject == subject),
             ) as Box<dyn Iterator<Item = _> + Send>)
@@ -2342,35 +2337,35 @@ impl<F: 'static + FileLoad + FileStore + Clone, T: 'static + PersistentLayerStor
         }
     }
 
-    async fn triple_additions_sp(
+    fn triple_additions_sp(
         &self,
         layer: [u32; 5],
         subject: u64,
         predicate: u64,
     ) -> io::Result<Box<dyn Iterator<Item = IdTriple> + Send>> {
         let (subjects_file, s_p_aj_files, sp_o_aj_files) =
-            self.triple_addition_files(layer).await?;
+            self.triple_addition_files(layer)?;
 
         Ok(Box::new(
             file_triple_iterator(subjects_file, s_p_aj_files, sp_o_aj_files)
-                .await?
+                ?
                 .seek_subject_predicate(subject, predicate)
                 .take_while(move |t| t.predicate == predicate && t.subject == subject),
         ) as Box<dyn Iterator<Item = _> + Send>)
     }
 
-    async fn triple_removals_sp(
+    fn triple_removals_sp(
         &self,
         layer: [u32; 5],
         subject: u64,
         predicate: u64,
     ) -> io::Result<Box<dyn Iterator<Item = IdTriple> + Send>> {
         if let Some((subjects_file, s_p_aj_files, sp_o_aj_files)) =
-            self.triple_removal_files(layer).await?
+            self.triple_removal_files(layer)?
         {
             Ok(Box::new(
                 file_triple_iterator(subjects_file, s_p_aj_files, sp_o_aj_files)
-                    .await?
+                    ?
                     .seek_subject_predicate(subject, predicate)
                     .take_while(move |t| t.predicate == predicate && t.subject == subject),
             ) as Box<dyn Iterator<Item = _> + Send>)
@@ -2379,14 +2374,14 @@ impl<F: 'static + FileLoad + FileStore + Clone, T: 'static + PersistentLayerStor
         }
     }
 
-    async fn triple_additions_p(
+    fn triple_additions_p(
         &self,
         layer: [u32; 5],
         predicate: u64,
     ) -> io::Result<Box<dyn Iterator<Item = IdTriple> + Send>> {
         let (subjects_file, s_p_aj_files, sp_o_aj_files) =
-            self.triple_addition_files(layer).await?;
-        let predicate_wavelet_files = self.predicate_wavelet_addition_files(layer).await?;
+            self.triple_addition_files(layer)?;
+        let predicate_wavelet_files = self.predicate_wavelet_addition_files(layer)?;
 
         Ok(Box::new(
             file_triple_iterator_by_predicate(
@@ -2396,18 +2391,18 @@ impl<F: 'static + FileLoad + FileStore + Clone, T: 'static + PersistentLayerStor
                 predicate_wavelet_files,
                 predicate,
             )
-            .await?,
+            ?,
         ) as Box<dyn Iterator<Item = _> + Send>)
     }
 
-    async fn triple_removals_p(
+    fn triple_removals_p(
         &self,
         layer: [u32; 5],
         predicate: u64,
     ) -> io::Result<Box<dyn Iterator<Item = IdTriple> + Send>> {
         if let (Some((subjects_file, s_p_aj_files, sp_o_aj_files)), Some(predicate_wavelet_files)) = (
-            self.triple_removal_files(layer).await?,
-            self.predicate_wavelet_removal_files(layer).await?,
+            self.triple_removal_files(layer)?,
+            self.predicate_wavelet_removal_files(layer)?,
         ) {
             Ok(Box::new(
                 file_triple_iterator_by_predicate(
@@ -2417,20 +2412,20 @@ impl<F: 'static + FileLoad + FileStore + Clone, T: 'static + PersistentLayerStor
                     predicate_wavelet_files,
                     predicate,
                 )
-                .await?,
+                ?,
             ) as Box<dyn Iterator<Item = _> + Send>)
         } else {
             Ok(Box::new(std::iter::empty()) as Box<dyn Iterator<Item = _> + Send>)
         }
     }
 
-    async fn triple_additions_o(
+    fn triple_additions_o(
         &self,
         layer: [u32; 5],
         object: u64,
     ) -> io::Result<Box<dyn Iterator<Item = IdTriple> + Send>> {
         let (subjects_file, objects_file, o_ps_aj_files, s_p_aj_files) =
-            self.triple_addition_files_by_object(layer).await?;
+            self.triple_addition_files_by_object(layer)?;
 
         Ok(Box::new(
             file_triple_iterator_by_object(
@@ -2440,18 +2435,18 @@ impl<F: 'static + FileLoad + FileStore + Clone, T: 'static + PersistentLayerStor
                 s_p_aj_files,
                 object,
             )
-            .await?
+            ?
             .take_while(move |t| t.object == object),
         ) as Box<dyn Iterator<Item = _> + Send>)
     }
 
-    async fn triple_removals_o(
+    fn triple_removals_o(
         &self,
         layer: [u32; 5],
         object: u64,
     ) -> io::Result<Box<dyn Iterator<Item = IdTriple> + Send>> {
         if let Some((subjects_file, objects_file, o_ps_aj_files, s_p_aj_files)) =
-            self.triple_removal_files_by_object(layer).await?
+            self.triple_removal_files_by_object(layer)?
         {
             Ok(Box::new(
                 file_triple_iterator_by_object(
@@ -2461,7 +2456,7 @@ impl<F: 'static + FileLoad + FileStore + Clone, T: 'static + PersistentLayerStor
                     s_p_aj_files,
                     object,
                 )
-                .await?
+                ?
                 .take_while(move |t| t.object == object),
             ) as Box<dyn Iterator<Item = _> + Send>)
         } else {
@@ -2469,28 +2464,28 @@ impl<F: 'static + FileLoad + FileStore + Clone, T: 'static + PersistentLayerStor
         }
     }
 
-    async fn triple_layer_addition_count(&self, layer: [u32; 5]) -> io::Result<usize> {
+    fn triple_layer_addition_count(&self, layer: [u32; 5]) -> io::Result<usize> {
         let (s_p_nums_file, sp_o_bits_file, predicate_wavelet_files) =
-            self.triple_layer_addition_count_files(layer).await?;
-        file_triple_layer_count(s_p_nums_file, sp_o_bits_file, predicate_wavelet_files).await
+            self.triple_layer_addition_count_files(layer)?;
+        file_triple_layer_count(s_p_nums_file, sp_o_bits_file, predicate_wavelet_files)
     }
 
-    async fn triple_layer_removal_count(&self, layer: [u32; 5]) -> io::Result<usize> {
+    fn triple_layer_removal_count(&self, layer: [u32; 5]) -> io::Result<usize> {
         if let Some((s_p_nums_file, sp_o_bits_file, predicate_wavelet_files)) =
-            self.triple_layer_removal_count_files(layer).await?
+            self.triple_layer_removal_count_files(layer)?
         {
-            file_triple_layer_count(s_p_nums_file, sp_o_bits_file, predicate_wavelet_files).await
+            file_triple_layer_count(s_p_nums_file, sp_o_bits_file, predicate_wavelet_files)
         } else {
             Ok(0)
         }
     }
 
-    async fn retrieve_layer_stack_names(&self, name: [u32; 5]) -> io::Result<Vec<[u32; 5]>> {
+    fn retrieve_layer_stack_names(&self, name: [u32; 5]) -> io::Result<Vec<[u32; 5]>> {
         let mut result = vec![name];
 
         loop {
-            if self.layer_has_parent(*result.last().unwrap()).await? {
-                let parent = self.read_parent_file(*result.last().unwrap()).await?;
+            if self.layer_has_parent(*result.last().unwrap())? {
+                let parent = self.read_parent_file(*result.last().unwrap())?;
                 result.push(parent);
             } else {
                 result.reverse();
@@ -2500,7 +2495,7 @@ impl<F: 'static + FileLoad + FileStore + Clone, T: 'static + PersistentLayerStor
         }
     }
 
-    async fn retrieve_layer_stack_names_upto(
+    fn retrieve_layer_stack_names_upto(
         &self,
         name: [u32; 5],
         upto: [u32; 5],
@@ -2508,8 +2503,8 @@ impl<F: 'static + FileLoad + FileStore + Clone, T: 'static + PersistentLayerStor
         let mut result = vec![name];
 
         loop {
-            if self.layer_has_parent(*result.last().unwrap()).await? {
-                let parent = self.read_parent_file(*result.last().unwrap()).await?;
+            if self.layer_has_parent(*result.last().unwrap())? {
+                let parent = self.read_parent_file(*result.last().unwrap())?;
                 if parent == upto {
                     break;
                 }
@@ -2527,7 +2522,7 @@ impl<F: 'static + FileLoad + FileStore + Clone, T: 'static + PersistentLayerStor
     }
 }
 
-pub(crate) async fn file_triple_exists<F: FileLoad + FileStore>(
+pub(crate) fn file_triple_exists<F: FileLoad + FileStore>(
     subjects_file: F,
     s_p_adjacency_list_files: AdjacencyListFiles<F>,
     sp_o_adjacency_list_files: AdjacencyListFiles<F>,
@@ -2535,12 +2530,12 @@ pub(crate) async fn file_triple_exists<F: FileLoad + FileStore>(
     predicate: u64,
     object: u64,
 ) -> io::Result<bool> {
-    let s_p_maps = s_p_adjacency_list_files.map_all().await?;
-    let sp_o_maps = sp_o_adjacency_list_files.map_all().await?;
+    let s_p_maps = s_p_adjacency_list_files.map_all()?;
+    let sp_o_maps = sp_o_adjacency_list_files.map_all()?;
 
     let subjects: Option<MonotonicLogArray> = subjects_file
         .map_if_exists()
-        .await?
+        ?
         .map(|l| LogArray::parse(l).unwrap().into());
     let s_p_aj = s_p_maps.into();
     let sp_o_aj = sp_o_maps.into();
@@ -2555,17 +2550,17 @@ pub(crate) async fn file_triple_exists<F: FileLoad + FileStore>(
     ))
 }
 
-pub(crate) async fn file_triple_iterator<F: FileLoad + FileStore>(
+pub(crate) fn file_triple_iterator<F: FileLoad + FileStore>(
     subjects_file: F,
     s_p_adjacency_list_files: AdjacencyListFiles<F>,
     sp_o_adjacency_list_files: AdjacencyListFiles<F>,
 ) -> io::Result<InternalLayerTripleSubjectIterator> {
-    let s_p_maps = s_p_adjacency_list_files.map_all().await?;
-    let sp_o_maps = sp_o_adjacency_list_files.map_all().await?;
+    let s_p_maps = s_p_adjacency_list_files.map_all()?;
+    let sp_o_maps = sp_o_adjacency_list_files.map_all()?;
 
     let subjects: Option<MonotonicLogArray> = subjects_file
         .map_if_exists()
-        .await?
+        ?
         .map(|l| LogArray::parse(l).unwrap().into());
     let s_p_aj = s_p_maps.into();
     let sp_o_aj = sp_o_maps.into();
@@ -2575,20 +2570,20 @@ pub(crate) async fn file_triple_iterator<F: FileLoad + FileStore>(
     ))
 }
 
-pub(crate) async fn file_triple_iterator_by_predicate<F: FileLoad + FileStore>(
+pub(crate) fn file_triple_iterator_by_predicate<F: FileLoad + FileStore>(
     subjects_file: F,
     s_p_adjacency_list_files: AdjacencyListFiles<F>,
     sp_o_adjacency_list_files: AdjacencyListFiles<F>,
     predicate_wavelet_files: BitIndexFiles<F>,
     predicate: u64,
 ) -> io::Result<impl Iterator<Item = IdTriple> + Send> {
-    let s_p_maps = s_p_adjacency_list_files.map_all().await?;
-    let sp_o_maps = sp_o_adjacency_list_files.map_all().await?;
-    let predicate_wavelet_maps = predicate_wavelet_files.map_all().await?;
+    let s_p_maps = s_p_adjacency_list_files.map_all()?;
+    let sp_o_maps = sp_o_adjacency_list_files.map_all()?;
+    let predicate_wavelet_maps = predicate_wavelet_files.map_all()?;
 
     let subjects: Option<MonotonicLogArray> = subjects_file
         .map_if_exists()
-        .await?
+        ?
         .map(|l| LogArray::parse(l).unwrap().into());
     let s_p_aj: AdjacencyList = s_p_maps.into();
     let sp_o_aj: AdjacencyList = sp_o_maps.into();
@@ -2604,7 +2599,7 @@ pub(crate) async fn file_triple_iterator_by_predicate<F: FileLoad + FileStore>(
     })
 }
 
-pub(crate) async fn file_triple_iterator_by_object<F: FileLoad + FileStore>(
+pub(crate) fn file_triple_iterator_by_object<F: FileLoad + FileStore>(
     subjects_file: F,
     objects_file: F,
     o_ps_adjacency_list_files: AdjacencyListFiles<F>,
@@ -2613,15 +2608,15 @@ pub(crate) async fn file_triple_iterator_by_object<F: FileLoad + FileStore>(
 ) -> io::Result<impl Iterator<Item = IdTriple> + Send> {
     let subjects: Option<MonotonicLogArray> = subjects_file
         .map_if_exists()
-        .await?
+        ?
         .map(|l| LogArray::parse(l).unwrap().into());
     let objects: Option<MonotonicLogArray> = objects_file
         .map_if_exists()
-        .await?
+        ?
         .map(|l| LogArray::parse(l).unwrap().into());
 
-    let o_ps_maps = o_ps_adjacency_list_files.map_all().await?;
-    let s_p_maps = s_p_adjacency_list_files.map_all().await?;
+    let o_ps_maps = o_ps_adjacency_list_files.map_all()?;
+    let s_p_maps = s_p_adjacency_list_files.map_all()?;
     let o_ps_aj: AdjacencyList = o_ps_maps.into();
     let s_p_aj: AdjacencyList = s_p_maps.into();
 
@@ -2631,17 +2626,17 @@ pub(crate) async fn file_triple_iterator_by_object<F: FileLoad + FileStore>(
     )
 }
 
-pub(crate) async fn file_triple_layer_count<F: FileLoad + FileStore>(
+pub(crate) fn file_triple_layer_count<F: FileLoad + FileStore>(
     s_p_nums_file: F,
     sp_o_bits_file: F,
     predicate_wavelet_files: BitIndexFiles<F>,
 ) -> io::Result<usize> {
-    let (_, width) = logarray_file_get_length_and_width(s_p_nums_file).await?;
-    let bits_len: usize = bitarray_len_from_file(sp_o_bits_file)
-        .await?
+    let (_, width) = logarray_file_get_length_and_width(&s_p_nums_file)?;
+    let bits_len: usize = bitarray_len_from_file(&sp_o_bits_file)
+        ?
         .try_into()
         .unwrap();
-    let predicate_wavelet_maps = predicate_wavelet_files.map_all().await?;
+    let predicate_wavelet_maps = predicate_wavelet_files.map_all()?;
     let wavelet_bits = predicate_wavelet_maps.into();
     let wtree = WaveletTree::from_parts(wavelet_bits, width);
 
@@ -2655,42 +2650,64 @@ mod tests {
     use crate::storage::directory::DirectoryLayerStore;
     use crate::storage::memory::MemoryLayerStore;
     use std::collections::HashMap;
-    use tempfile::{tempdir, TempDir};
+    use std::sync::LazyLock;
+
+    /// Simple temp directory helper that cleans up on drop (replaces tempfile::tempdir)
+    struct TempDir(std::path::PathBuf);
+    impl TempDir {
+        fn new() -> io::Result<Self> {
+            let mut path = std::env::temp_dir();
+            let random_name: [u32; 2] = rand::random();
+            path.push(format!("terminus-test-{:08x}{:08x}", random_name[0], random_name[1]));
+            std::fs::create_dir_all(&path)?;
+            Ok(TempDir(path))
+        }
+        fn path(&self) -> &std::path::Path {
+            &self.0
+        }
+    }
+    impl Drop for TempDir {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+    fn tempdir() -> io::Result<TempDir> {
+        TempDir::new()
+    }
+
     // these tests are for both the memory store and the directory store
     // They test functionality that should really work for both
 
-    lazy_static! {
-        static ref BASE_TRIPLES: Vec<ValueTriple> = vec![
-            ValueTriple::new_string_value("cow", "says", "moo"),
-            ValueTriple::new_string_value("cow", "says", "mooo"),
-            ValueTriple::new_node("cow", "likes", "duck"),
-            ValueTriple::new_node("cow", "likes", "pig"),
-            ValueTriple::new_string_value("cow", "name", "clarabelle"),
-            ValueTriple::new_string_value("pig", "says", "oink"),
-            ValueTriple::new_node("pig", "hates", "cow"),
-            ValueTriple::new_string_value("duck", "says", "quack"),
-            ValueTriple::new_node("duck", "hates", "cow"),
-            ValueTriple::new_node("duck", "hates", "pig"),
-            ValueTriple::new_string_value("duck", "name", "donald"),
-        ];
-        static ref CHILD_ADDITION_TRIPLES: Vec<ValueTriple> = vec![
-            ValueTriple::new_string_value("cow", "says", "moooo"),
-            ValueTriple::new_string_value("cow", "says", "mooooo"),
-            ValueTriple::new_node("cow", "likes", "horse"),
-            ValueTriple::new_node("pig", "likes", "platypus"),
-            ValueTriple::new_node("duck", "hates", "platypus"),
-        ];
-        static ref CHILD_REMOVAL_TRIPLES: Vec<ValueTriple> = vec![
-            ValueTriple::new_string_value("cow", "says", "mooo"),
-            ValueTriple::new_string_value("cow", "name", "clarabelle"),
-            ValueTriple::new_node("pig", "hates", "cow"),
-            ValueTriple::new_node("duck", "hates", "cow"),
-            ValueTriple::new_node("duck", "hates", "pig"),
-            ValueTriple::new_string_value("duck", "name", "donald"),
-        ];
-    }
+    static BASE_TRIPLES: LazyLock<Vec<ValueTriple>> = LazyLock::new(|| vec![
+        ValueTriple::new_string_value("cow", "says", "moo"),
+        ValueTriple::new_string_value("cow", "says", "mooo"),
+        ValueTriple::new_node("cow", "likes", "duck"),
+        ValueTriple::new_node("cow", "likes", "pig"),
+        ValueTriple::new_string_value("cow", "name", "clarabelle"),
+        ValueTriple::new_string_value("pig", "says", "oink"),
+        ValueTriple::new_node("pig", "hates", "cow"),
+        ValueTriple::new_string_value("duck", "says", "quack"),
+        ValueTriple::new_node("duck", "hates", "cow"),
+        ValueTriple::new_node("duck", "hates", "pig"),
+        ValueTriple::new_string_value("duck", "name", "donald"),
+    ]);
+    static CHILD_ADDITION_TRIPLES: LazyLock<Vec<ValueTriple>> = LazyLock::new(|| vec![
+        ValueTriple::new_string_value("cow", "says", "moooo"),
+        ValueTriple::new_string_value("cow", "says", "mooooo"),
+        ValueTriple::new_node("cow", "likes", "horse"),
+        ValueTriple::new_node("pig", "likes", "platypus"),
+        ValueTriple::new_node("duck", "hates", "platypus"),
+    ]);
+    static CHILD_REMOVAL_TRIPLES: LazyLock<Vec<ValueTriple>> = LazyLock::new(|| vec![
+        ValueTriple::new_string_value("cow", "says", "mooo"),
+        ValueTriple::new_string_value("cow", "name", "clarabelle"),
+        ValueTriple::new_node("pig", "hates", "cow"),
+        ValueTriple::new_node("duck", "hates", "cow"),
+        ValueTriple::new_node("duck", "hates", "pig"),
+        ValueTriple::new_string_value("duck", "name", "donald"),
+    ]);
 
-    async fn example_base_layer<S: LayerStore>(
+    fn example_base_layer<S: LayerStore>(
         store: &S,
         invalidate: bool,
     ) -> io::Result<(
@@ -2698,13 +2715,13 @@ mod tests {
         Option<Arc<InternalLayer>>,
         HashMap<ValueTriple, IdTriple>,
     )> {
-        let mut builder = store.create_base_layer().await?;
+        let mut builder = store.create_base_layer()?;
         let name = builder.name();
         for t in BASE_TRIPLES.iter() {
             builder.add_value_triple(t.clone());
         }
-        builder.commit_boxed().await?;
-        let layer = store.get_layer(name).await?.unwrap();
+        builder.commit_boxed()?;
+        let layer = store.get_layer(name)?.unwrap();
 
         let mut contents = HashMap::with_capacity(BASE_TRIPLES.len());
         for t in BASE_TRIPLES.iter() {
@@ -2720,7 +2737,7 @@ mod tests {
         Ok((name, layer_opt, contents))
     }
 
-    async fn example_child_layer<S: LayerStore>(
+    fn example_child_layer<S: LayerStore>(
         store: &S,
         invalidate: bool,
     ) -> io::Result<(
@@ -2729,8 +2746,8 @@ mod tests {
         HashMap<ValueTriple, IdTriple>,
         HashMap<ValueTriple, IdTriple>,
     )> {
-        let (base_name, _base_layer, _) = example_base_layer(store, false).await?;
-        let mut builder = store.create_child_layer(base_name).await?;
+        let (base_name, _base_layer, _) = example_base_layer(store, false)?;
+        let mut builder = store.create_child_layer(base_name)?;
         let name = builder.name();
         for t in CHILD_ADDITION_TRIPLES.iter() {
             builder.add_value_triple(t.clone());
@@ -2738,8 +2755,8 @@ mod tests {
         for t in CHILD_REMOVAL_TRIPLES.iter() {
             builder.remove_value_triple(t.clone());
         }
-        builder.commit_boxed().await?;
-        let layer = store.get_layer(name).await?.unwrap();
+        builder.commit_boxed()?;
+        let layer = store.get_layer(name)?.unwrap();
 
         let mut add_contents = HashMap::with_capacity(BASE_TRIPLES.len());
         for t in CHILD_ADDITION_TRIPLES.iter() {
@@ -2761,105 +2778,105 @@ mod tests {
         Ok((name, layer_opt, add_contents, remove_contents))
     }
 
-    async fn base_layer_counts<S: LayerStore>(store: &S, invalidate: bool) -> io::Result<()> {
-        let (name, _layer, _) = example_base_layer(store, invalidate).await?;
-        assert_eq!(11, store.triple_layer_addition_count(name).await?);
-        assert_eq!(0, store.triple_layer_removal_count(name).await?);
+    fn base_layer_counts<S: LayerStore>(store: &S, invalidate: bool) -> io::Result<()> {
+        let (name, _layer, _) = example_base_layer(store, invalidate)?;
+        assert_eq!(11, store.triple_layer_addition_count(name)?);
+        assert_eq!(0, store.triple_layer_removal_count(name)?);
 
         Ok(())
     }
 
-    #[tokio::test]
-    async fn memory_base_layer_counts() {
+    #[test]
+    fn memory_base_layer_counts() {
         let store = MemoryLayerStore::new();
-        base_layer_counts(&store, false).await.unwrap();
+        base_layer_counts(&store, false).unwrap();
     }
 
-    #[tokio::test]
-    async fn directory_base_layer_counts() {
+    #[test]
+    fn directory_base_layer_counts() {
         let dir = tempdir().unwrap();
         let store = DirectoryLayerStore::new(dir.path());
-        base_layer_counts(&store, false).await.unwrap();
+        base_layer_counts(&store, false).unwrap();
     }
 
-    async fn child_layer_counts<S: LayerStore>(store: &S, invalidate: bool) -> io::Result<()> {
-        let (name, _layer, _, _) = example_child_layer(store, invalidate).await?;
-        assert_eq!(5, store.triple_layer_addition_count(name).await?);
-        assert_eq!(6, store.triple_layer_removal_count(name).await?);
+    fn child_layer_counts<S: LayerStore>(store: &S, invalidate: bool) -> io::Result<()> {
+        let (name, _layer, _, _) = example_child_layer(store, invalidate)?;
+        assert_eq!(5, store.triple_layer_addition_count(name)?);
+        assert_eq!(6, store.triple_layer_removal_count(name)?);
 
         Ok(())
     }
 
-    #[tokio::test]
-    async fn memory_child_layer_counts() {
+    #[test]
+    fn memory_child_layer_counts() {
         let store = MemoryLayerStore::new();
-        child_layer_counts(&store, false).await.unwrap();
+        child_layer_counts(&store, false).unwrap();
     }
 
-    #[tokio::test]
-    async fn directory_child_layer_counts() {
+    #[test]
+    fn directory_child_layer_counts() {
         let dir = tempdir().unwrap();
         let store = DirectoryLayerStore::new(dir.path());
-        child_layer_counts(&store, false).await.unwrap();
+        child_layer_counts(&store, false).unwrap();
     }
 
-    async fn base_layer_addition_exists<S: LayerStore>(
+    fn base_layer_addition_exists<S: LayerStore>(
         store: &S,
         invalidate: bool,
     ) -> io::Result<()> {
-        let (name, _layer, triples) = example_base_layer(store, invalidate).await?;
+        let (name, _layer, triples) = example_base_layer(store, invalidate)?;
 
         for t in triples.values() {
             assert!(
                 store
                     .triple_addition_exists(name, t.subject, t.predicate, t.object)
-                    .await?
+                    ?
             );
         }
 
-        assert!(!store.triple_addition_exists(name, 42, 42, 42).await?);
+        assert!(!store.triple_addition_exists(name, 42, 42, 42)?);
         Ok(())
     }
 
-    #[tokio::test]
-    async fn memory_base_layer_addition_exists() {
+    #[test]
+    fn memory_base_layer_addition_exists() {
         let store = MemoryLayerStore::new();
-        base_layer_addition_exists(&store, false).await.unwrap();
+        base_layer_addition_exists(&store, false).unwrap();
     }
 
-    #[tokio::test]
-    async fn directory_base_layer_addition_exists() {
+    #[test]
+    fn directory_base_layer_addition_exists() {
         let dir = tempdir().unwrap();
         let store = DirectoryLayerStore::new(dir.path());
-        base_layer_addition_exists(&store, false).await.unwrap();
+        base_layer_addition_exists(&store, false).unwrap();
     }
 
-    async fn base_layer_additions<S: LayerStore>(store: &S, invalidate: bool) -> io::Result<()> {
-        let (name, _layer, triples) = example_base_layer(store, invalidate).await?;
+    fn base_layer_additions<S: LayerStore>(store: &S, invalidate: bool) -> io::Result<()> {
+        let (name, _layer, triples) = example_base_layer(store, invalidate)?;
         let mut values: Vec<_> = triples.values().cloned().collect();
         values.sort();
 
-        let additions: Vec<_> = store.triple_additions(name).await?.collect();
+        let additions: Vec<_> = store.triple_additions(name)?.collect();
         assert_eq!(values, additions);
 
         Ok(())
     }
 
-    #[tokio::test]
-    async fn memory_base_layer_additions() {
+    #[test]
+    fn memory_base_layer_additions() {
         let store = MemoryLayerStore::new();
-        base_layer_additions(&store, false).await.unwrap();
+        base_layer_additions(&store, false).unwrap();
     }
 
-    #[tokio::test]
-    async fn directory_base_layer_additions() {
+    #[test]
+    fn directory_base_layer_additions() {
         let dir = tempdir().unwrap();
         let store = DirectoryLayerStore::new(dir.path());
-        base_layer_additions(&store, false).await.unwrap();
+        base_layer_additions(&store, false).unwrap();
     }
 
-    async fn base_layer_additions_s<S: LayerStore>(store: &S, invalidate: bool) -> io::Result<()> {
-        let (name, _layer, contents) = example_base_layer(store, invalidate).await?;
+    fn base_layer_additions_s<S: LayerStore>(store: &S, invalidate: bool) -> io::Result<()> {
+        let (name, _layer, contents) = example_base_layer(store, invalidate)?;
 
         let mut triples: Vec<_> = contents
             .iter()
@@ -2872,30 +2889,30 @@ mod tests {
 
         let result: Vec<_> = store
             .triple_additions_s(name, triples[0].subject)
-            .await?
+            ?
             .collect();
         assert_eq!(triples, result);
 
-        assert!(store.triple_additions_s(name, 42).await?.next().is_none());
+        assert!(store.triple_additions_s(name, 42)?.next().is_none());
 
         Ok(())
     }
 
-    #[tokio::test]
-    async fn memory_base_layer_additions_s() {
+    #[test]
+    fn memory_base_layer_additions_s() {
         let store = MemoryLayerStore::new();
-        base_layer_additions_s(&store, false).await.unwrap();
+        base_layer_additions_s(&store, false).unwrap();
     }
 
-    #[tokio::test]
-    async fn directory_base_layer_additions_s() {
+    #[test]
+    fn directory_base_layer_additions_s() {
         let dir = tempdir().unwrap();
         let store = DirectoryLayerStore::new(dir.path());
-        base_layer_additions_s(&store, false).await.unwrap();
+        base_layer_additions_s(&store, false).unwrap();
     }
 
-    async fn base_layer_additions_sp<S: LayerStore>(store: &S, invalidate: bool) -> io::Result<()> {
-        let (name, _layer, contents) = example_base_layer(store, invalidate).await?;
+    fn base_layer_additions_sp<S: LayerStore>(store: &S, invalidate: bool) -> io::Result<()> {
+        let (name, _layer, contents) = example_base_layer(store, invalidate)?;
 
         let mut triples: Vec<_> = contents
             .iter()
@@ -2908,34 +2925,34 @@ mod tests {
 
         let result: Vec<_> = store
             .triple_additions_sp(name, triples[0].subject, triples[0].predicate)
-            .await?
+            ?
             .collect();
         assert_eq!(triples, result);
 
         assert!(store
             .triple_additions_sp(name, 42, 42)
-            .await?
+            ?
             .next()
             .is_none());
 
         Ok(())
     }
 
-    #[tokio::test]
-    async fn memory_base_layer_additions_sp() {
+    #[test]
+    fn memory_base_layer_additions_sp() {
         let store = MemoryLayerStore::new();
-        base_layer_additions_sp(&store, false).await.unwrap();
+        base_layer_additions_sp(&store, false).unwrap();
     }
 
-    #[tokio::test]
-    async fn directory_base_layer_additions_sp() {
+    #[test]
+    fn directory_base_layer_additions_sp() {
         let dir = tempdir().unwrap();
         let store = DirectoryLayerStore::new(dir.path());
-        base_layer_additions_sp(&store, false).await.unwrap();
+        base_layer_additions_sp(&store, false).unwrap();
     }
 
-    async fn base_layer_additions_p<S: LayerStore>(store: &S, invalidate: bool) -> io::Result<()> {
-        let (name, _layer, contents) = example_base_layer(store, invalidate).await?;
+    fn base_layer_additions_p<S: LayerStore>(store: &S, invalidate: bool) -> io::Result<()> {
+        let (name, _layer, contents) = example_base_layer(store, invalidate)?;
 
         let mut triples: Vec<_> = contents
             .iter()
@@ -2948,30 +2965,30 @@ mod tests {
 
         let result: Vec<_> = store
             .triple_additions_p(name, triples[0].predicate)
-            .await?
+            ?
             .collect();
         assert_eq!(triples, result);
 
-        assert!(store.triple_additions_p(name, 42).await?.next().is_none());
+        assert!(store.triple_additions_p(name, 42)?.next().is_none());
 
         Ok(())
     }
 
-    #[tokio::test]
-    async fn memory_base_layer_additions_p() {
+    #[test]
+    fn memory_base_layer_additions_p() {
         let store = MemoryLayerStore::new();
-        base_layer_additions_p(&store, false).await.unwrap();
+        base_layer_additions_p(&store, false).unwrap();
     }
 
-    #[tokio::test]
-    async fn directory_base_layer_additions_p() {
+    #[test]
+    fn directory_base_layer_additions_p() {
         let dir = tempdir().unwrap();
         let store = DirectoryLayerStore::new(dir.path());
-        base_layer_additions_p(&store, false).await.unwrap();
+        base_layer_additions_p(&store, false).unwrap();
     }
 
-    async fn base_layer_additions_o<S: LayerStore>(store: &S, invalidate: bool) -> io::Result<()> {
-        let (name, _layer, contents) = example_base_layer(store, invalidate).await?;
+    fn base_layer_additions_o<S: LayerStore>(store: &S, invalidate: bool) -> io::Result<()> {
+        let (name, _layer, contents) = example_base_layer(store, invalidate)?;
 
         let mut triples: Vec<_> = contents
             .iter()
@@ -2984,115 +3001,115 @@ mod tests {
 
         let result: Vec<_> = store
             .triple_additions_o(name, triples[0].object)
-            .await?
+            ?
             .collect();
         assert_eq!(triples, result);
 
-        assert!(store.triple_additions_o(name, 42).await?.next().is_none());
+        assert!(store.triple_additions_o(name, 42)?.next().is_none());
 
         Ok(())
     }
 
-    #[tokio::test]
-    async fn memory_base_layer_additions_o() {
+    #[test]
+    fn memory_base_layer_additions_o() {
         let store = MemoryLayerStore::new();
-        base_layer_additions_o(&store, false).await.unwrap();
+        base_layer_additions_o(&store, false).unwrap();
     }
 
-    #[tokio::test]
-    async fn directory_base_layer_additions_o() {
+    #[test]
+    fn directory_base_layer_additions_o() {
         let dir = tempdir().unwrap();
         let store = DirectoryLayerStore::new(dir.path());
-        base_layer_additions_o(&store, false).await.unwrap();
+        base_layer_additions_o(&store, false).unwrap();
     }
 
-    async fn base_layer_removals<S: LayerStore>(store: &S, invalidate: bool) -> io::Result<()> {
-        let (name, _layer, _) = example_base_layer(store, invalidate).await?;
+    fn base_layer_removals<S: LayerStore>(store: &S, invalidate: bool) -> io::Result<()> {
+        let (name, _layer, _) = example_base_layer(store, invalidate)?;
 
-        assert!(!store.triple_removal_exists(name, 42, 42, 42).await?);
-        assert!(store.triple_removals(name).await?.next().is_none());
-        assert!(store.triple_removals_s(name, 42).await?.next().is_none());
+        assert!(!store.triple_removal_exists(name, 42, 42, 42)?);
+        assert!(store.triple_removals(name)?.next().is_none());
+        assert!(store.triple_removals_s(name, 42)?.next().is_none());
         assert!(store
             .triple_removals_sp(name, 42, 42)
-            .await?
+            ?
             .next()
             .is_none());
-        assert!(store.triple_removals_p(name, 42).await?.next().is_none());
-        assert!(store.triple_removals_o(name, 42).await?.next().is_none());
+        assert!(store.triple_removals_p(name, 42)?.next().is_none());
+        assert!(store.triple_removals_o(name, 42)?.next().is_none());
 
         Ok(())
     }
 
-    #[tokio::test]
-    async fn memory_base_layer_removals() {
+    #[test]
+    fn memory_base_layer_removals() {
         let store = MemoryLayerStore::new();
-        base_layer_removals(&store, false).await.unwrap();
+        base_layer_removals(&store, false).unwrap();
     }
 
-    #[tokio::test]
-    async fn directory_base_layer_removals() {
+    #[test]
+    fn directory_base_layer_removals() {
         let dir = tempdir().unwrap();
         let store = DirectoryLayerStore::new(dir.path());
-        base_layer_removals(&store, false).await.unwrap();
+        base_layer_removals(&store, false).unwrap();
     }
 
-    async fn child_layer_addition_exists<S: LayerStore>(
+    fn child_layer_addition_exists<S: LayerStore>(
         store: &S,
         invalidate: bool,
     ) -> io::Result<()> {
-        let (name, _layer, triples, _) = example_child_layer(store, invalidate).await?;
+        let (name, _layer, triples, _) = example_child_layer(store, invalidate)?;
 
         for t in triples.values() {
             assert!(
                 store
                     .triple_addition_exists(name, t.subject, t.predicate, t.object)
-                    .await?
+                    ?
             );
         }
 
-        assert!(!store.triple_addition_exists(name, 42, 42, 42).await?);
+        assert!(!store.triple_addition_exists(name, 42, 42, 42)?);
         Ok(())
     }
 
-    #[tokio::test]
-    async fn memory_child_layer_addition_exists() {
+    #[test]
+    fn memory_child_layer_addition_exists() {
         let store = MemoryLayerStore::new();
-        child_layer_addition_exists(&store, false).await.unwrap();
+        child_layer_addition_exists(&store, false).unwrap();
     }
 
-    #[tokio::test]
-    async fn directory_child_layer_addition_exists() {
+    #[test]
+    fn directory_child_layer_addition_exists() {
         let dir = tempdir().unwrap();
         let store = DirectoryLayerStore::new(dir.path());
-        child_layer_addition_exists(&store, false).await.unwrap();
+        child_layer_addition_exists(&store, false).unwrap();
     }
 
-    async fn child_layer_additions<S: LayerStore>(store: &S, invalidate: bool) -> io::Result<()> {
-        let (name, _layer, triples, _) = example_child_layer(store, invalidate).await?;
+    fn child_layer_additions<S: LayerStore>(store: &S, invalidate: bool) -> io::Result<()> {
+        let (name, _layer, triples, _) = example_child_layer(store, invalidate)?;
         let mut values: Vec<_> = triples.values().cloned().collect();
         values.sort();
 
-        let additions: Vec<_> = store.triple_additions(name).await?.collect();
+        let additions: Vec<_> = store.triple_additions(name)?.collect();
         assert_eq!(values, additions);
 
         Ok(())
     }
 
-    #[tokio::test]
-    async fn memory_child_layer_additions() {
+    #[test]
+    fn memory_child_layer_additions() {
         let store = MemoryLayerStore::new();
-        child_layer_additions(&store, false).await.unwrap();
+        child_layer_additions(&store, false).unwrap();
     }
 
-    #[tokio::test]
-    async fn directory_child_layer_additions() {
+    #[test]
+    fn directory_child_layer_additions() {
         let dir = tempdir().unwrap();
         let store = DirectoryLayerStore::new(dir.path());
-        child_layer_additions(&store, false).await.unwrap();
+        child_layer_additions(&store, false).unwrap();
     }
 
-    async fn child_layer_additions_s<S: LayerStore>(store: &S, invalidate: bool) -> io::Result<()> {
-        let (name, _layer, contents, _removals) = example_child_layer(store, invalidate).await?;
+    fn child_layer_additions_s<S: LayerStore>(store: &S, invalidate: bool) -> io::Result<()> {
+        let (name, _layer, contents, _removals) = example_child_layer(store, invalidate)?;
 
         let mut triples: Vec<_> = contents
             .iter()
@@ -3105,33 +3122,33 @@ mod tests {
 
         let result: Vec<_> = store
             .triple_additions_s(name, triples[0].subject)
-            .await?
+            ?
             .collect();
         assert_eq!(triples, result);
 
-        assert!(store.triple_additions_s(name, 42).await?.next().is_none());
+        assert!(store.triple_additions_s(name, 42)?.next().is_none());
 
         Ok(())
     }
 
-    #[tokio::test]
-    async fn memory_child_layer_additions_s() {
+    #[test]
+    fn memory_child_layer_additions_s() {
         let store = MemoryLayerStore::new();
-        child_layer_additions_s(&store, false).await.unwrap();
+        child_layer_additions_s(&store, false).unwrap();
     }
 
-    #[tokio::test]
-    async fn directory_child_layer_additions_s() {
+    #[test]
+    fn directory_child_layer_additions_s() {
         let dir = tempdir().unwrap();
         let store = DirectoryLayerStore::new(dir.path());
-        child_layer_additions_s(&store, false).await.unwrap();
+        child_layer_additions_s(&store, false).unwrap();
     }
 
-    async fn child_layer_additions_sp<S: LayerStore>(
+    fn child_layer_additions_sp<S: LayerStore>(
         store: &S,
         invalidate: bool,
     ) -> io::Result<()> {
-        let (name, _layer, contents, _removals) = example_child_layer(store, invalidate).await?;
+        let (name, _layer, contents, _removals) = example_child_layer(store, invalidate)?;
 
         let mut triples: Vec<_> = contents
             .iter()
@@ -3144,34 +3161,34 @@ mod tests {
 
         let result: Vec<_> = store
             .triple_additions_sp(name, triples[0].subject, triples[0].predicate)
-            .await?
+            ?
             .collect();
         assert_eq!(triples, result);
 
         assert!(store
             .triple_additions_sp(name, 42, 42)
-            .await?
+            ?
             .next()
             .is_none());
 
         Ok(())
     }
 
-    #[tokio::test]
-    async fn memory_child_layer_additions_sp() {
+    #[test]
+    fn memory_child_layer_additions_sp() {
         let store = MemoryLayerStore::new();
-        child_layer_additions_sp(&store, false).await.unwrap();
+        child_layer_additions_sp(&store, false).unwrap();
     }
 
-    #[tokio::test]
-    async fn directory_child_layer_additions_sp() {
+    #[test]
+    fn directory_child_layer_additions_sp() {
         let dir = tempdir().unwrap();
         let store = DirectoryLayerStore::new(dir.path());
-        child_layer_additions_sp(&store, false).await.unwrap();
+        child_layer_additions_sp(&store, false).unwrap();
     }
 
-    async fn child_layer_additions_p<S: LayerStore>(store: &S, invalidate: bool) -> io::Result<()> {
-        let (name, _layer, contents, _removals) = example_child_layer(store, invalidate).await?;
+    fn child_layer_additions_p<S: LayerStore>(store: &S, invalidate: bool) -> io::Result<()> {
+        let (name, _layer, contents, _removals) = example_child_layer(store, invalidate)?;
 
         let mut triples: Vec<_> = contents
             .iter()
@@ -3184,30 +3201,30 @@ mod tests {
 
         let result: Vec<_> = store
             .triple_additions_p(name, triples[0].predicate)
-            .await?
+            ?
             .collect();
         assert_eq!(triples, result);
 
-        assert!(store.triple_additions_p(name, 42).await?.next().is_none());
+        assert!(store.triple_additions_p(name, 42)?.next().is_none());
 
         Ok(())
     }
 
-    #[tokio::test]
-    async fn memory_child_layer_additions_p() {
+    #[test]
+    fn memory_child_layer_additions_p() {
         let store = MemoryLayerStore::new();
-        child_layer_additions_p(&store, false).await.unwrap();
+        child_layer_additions_p(&store, false).unwrap();
     }
 
-    #[tokio::test]
-    async fn directory_child_layer_additions_p() {
+    #[test]
+    fn directory_child_layer_additions_p() {
         let dir = tempdir().unwrap();
         let store = DirectoryLayerStore::new(dir.path());
-        child_layer_additions_p(&store, false).await.unwrap();
+        child_layer_additions_p(&store, false).unwrap();
     }
 
-    async fn child_layer_additions_o<S: LayerStore>(store: &S, invalidate: bool) -> io::Result<()> {
-        let (name, _layer, contents, _removals) = example_child_layer(store, invalidate).await?;
+    fn child_layer_additions_o<S: LayerStore>(store: &S, invalidate: bool) -> io::Result<()> {
+        let (name, _layer, contents, _removals) = example_child_layer(store, invalidate)?;
 
         let mut triples: Vec<_> = contents
             .iter()
@@ -3220,85 +3237,85 @@ mod tests {
 
         let result: Vec<_> = store
             .triple_additions_o(name, triples[0].object)
-            .await?
+            ?
             .collect();
         assert_eq!(triples, result);
 
-        assert!(store.triple_additions_o(name, 42).await?.next().is_none());
+        assert!(store.triple_additions_o(name, 42)?.next().is_none());
 
         Ok(())
     }
 
-    #[tokio::test]
-    async fn memory_child_layer_additions_o() {
+    #[test]
+    fn memory_child_layer_additions_o() {
         let store = MemoryLayerStore::new();
-        child_layer_additions_o(&store, false).await.unwrap();
+        child_layer_additions_o(&store, false).unwrap();
     }
 
-    #[tokio::test]
-    async fn directory_child_layer_additions_o() {
+    #[test]
+    fn directory_child_layer_additions_o() {
         let dir = tempdir().unwrap();
         let store = DirectoryLayerStore::new(dir.path());
-        child_layer_additions_o(&store, false).await.unwrap();
+        child_layer_additions_o(&store, false).unwrap();
     }
 
-    async fn child_layer_removal_exists<S: LayerStore>(
+    fn child_layer_removal_exists<S: LayerStore>(
         store: &S,
         invalidate: bool,
     ) -> io::Result<()> {
-        let (name, _layer, _additions, removals) = example_child_layer(store, invalidate).await?;
+        let (name, _layer, _additions, removals) = example_child_layer(store, invalidate)?;
 
         for t in removals.values() {
             assert!(
                 store
                     .triple_removal_exists(name, t.subject, t.predicate, t.object)
-                    .await?
+                    ?
             );
         }
 
-        assert!(!store.triple_removal_exists(name, 42, 42, 42).await?);
+        assert!(!store.triple_removal_exists(name, 42, 42, 42)?);
         Ok(())
     }
 
-    #[tokio::test]
-    async fn memory_child_layer_removal_exists() {
+    #[test]
+    fn memory_child_layer_removal_exists() {
         let store = MemoryLayerStore::new();
-        child_layer_removal_exists(&store, false).await.unwrap();
+        child_layer_removal_exists(&store, false).unwrap();
     }
 
-    #[tokio::test]
-    async fn directory_child_layer_removal_exists() {
+    #[test]
+    fn directory_child_layer_removal_exists() {
         let dir = tempdir().unwrap();
         let store = DirectoryLayerStore::new(dir.path());
-        child_layer_removal_exists(&store, false).await.unwrap();
+        child_layer_removal_exists(&store, false).unwrap();
     }
 
-    async fn child_layer_removals<S: LayerStore>(store: &S, invalidate: bool) -> io::Result<()> {
-        let (name, _layer, _additions, removals) = example_child_layer(store, invalidate).await?;
+    fn child_layer_removals<S: LayerStore>(store: &S, invalidate: bool) -> io::Result<()> {
+        let (name, _layer, _additions, removals) = example_child_layer(store, invalidate)?;
         let mut values: Vec<_> = removals.values().cloned().collect();
         values.sort();
 
-        let removals: Vec<_> = store.triple_removals(name).await?.collect();
+        let removals: Vec<_> = store.triple_removals(name)?.collect();
         assert_eq!(values, removals);
 
         Ok(())
     }
 
-    #[tokio::test]
-    async fn memory_child_layer_removals() {
+    #[test]
+    fn memory_child_layer_removals() {
         let store = MemoryLayerStore::new();
-        child_layer_removals(&store, false).await.unwrap();
+        child_layer_removals(&store, false).unwrap();
     }
 
-    #[tokio::test]
-    async fn directory_child_layer_removals() {
+    #[test]
+    fn directory_child_layer_removals() {
         let dir = tempdir().unwrap();
         let store = DirectoryLayerStore::new(dir.path());
-        child_layer_removals(&store, false).await.unwrap();
+        child_layer_removals(&store, false).unwrap();
     }
 
-    async fn child_layer_removals_s<S: LayerStore>(store: &S, invalidate: bool) -> io::Result<()> {
-        let (name, _layer, _additions, removals) = example_child_layer(store, invalidate).await?;
+    fn child_layer_removals_s<S: LayerStore>(store: &S, invalidate: bool) -> io::Result<()> {
+        let (name, _layer, _additions, removals) = example_child_layer(store, invalidate)?;
 
         let mut triples: Vec<_> = removals
             .iter()
@@ -3311,30 +3328,30 @@ mod tests {
 
         let result: Vec<_> = store
             .triple_removals_s(name, triples[0].subject)
-            .await?
+            ?
             .collect();
         assert_eq!(triples, result);
 
-        assert!(store.triple_removals_s(name, 42).await?.next().is_none());
+        assert!(store.triple_removals_s(name, 42)?.next().is_none());
 
         Ok(())
     }
 
-    #[tokio::test]
-    async fn memory_child_layer_removals_s() {
+    #[test]
+    fn memory_child_layer_removals_s() {
         let store = MemoryLayerStore::new();
-        child_layer_removals_s(&store, false).await.unwrap();
+        child_layer_removals_s(&store, false).unwrap();
     }
 
-    #[tokio::test]
-    async fn directory_child_layer_removals_s() {
+    #[test]
+    fn directory_child_layer_removals_s() {
         let dir = tempdir().unwrap();
         let store = DirectoryLayerStore::new(dir.path());
-        child_layer_removals_s(&store, false).await.unwrap();
+        child_layer_removals_s(&store, false).unwrap();
     }
 
-    async fn child_layer_removals_sp<S: LayerStore>(store: &S, invalidate: bool) -> io::Result<()> {
-        let (name, _layer, _additions, removals) = example_child_layer(store, invalidate).await?;
+    fn child_layer_removals_sp<S: LayerStore>(store: &S, invalidate: bool) -> io::Result<()> {
+        let (name, _layer, _additions, removals) = example_child_layer(store, invalidate)?;
 
         let mut triples: Vec<_> = removals
             .iter()
@@ -3347,34 +3364,34 @@ mod tests {
 
         let result: Vec<_> = store
             .triple_removals_sp(name, triples[0].subject, triples[0].predicate)
-            .await?
+            ?
             .collect();
         assert_eq!(triples, result);
 
         assert!(store
             .triple_removals_sp(name, 42, 42)
-            .await?
+            ?
             .next()
             .is_none());
 
         Ok(())
     }
 
-    #[tokio::test]
-    async fn memory_child_layer_removals_sp() {
+    #[test]
+    fn memory_child_layer_removals_sp() {
         let store = MemoryLayerStore::new();
-        child_layer_removals_sp(&store, false).await.unwrap();
+        child_layer_removals_sp(&store, false).unwrap();
     }
 
-    #[tokio::test]
-    async fn directory_child_layer_removals_sp() {
+    #[test]
+    fn directory_child_layer_removals_sp() {
         let dir = tempdir().unwrap();
         let store = DirectoryLayerStore::new(dir.path());
-        child_layer_removals_sp(&store, false).await.unwrap();
+        child_layer_removals_sp(&store, false).unwrap();
     }
 
-    async fn child_layer_removals_p<S: LayerStore>(store: &S, invalidate: bool) -> io::Result<()> {
-        let (name, _layer, _additions, removals) = example_child_layer(store, invalidate).await?;
+    fn child_layer_removals_p<S: LayerStore>(store: &S, invalidate: bool) -> io::Result<()> {
+        let (name, _layer, _additions, removals) = example_child_layer(store, invalidate)?;
 
         let mut triples: Vec<_> = removals
             .iter()
@@ -3387,30 +3404,30 @@ mod tests {
 
         let result: Vec<_> = store
             .triple_removals_p(name, triples[0].predicate)
-            .await?
+            ?
             .collect();
         assert_eq!(triples, result);
 
-        assert!(store.triple_removals_p(name, 42).await?.next().is_none());
+        assert!(store.triple_removals_p(name, 42)?.next().is_none());
 
         Ok(())
     }
 
-    #[tokio::test]
-    async fn memory_child_layer_removals_p() {
+    #[test]
+    fn memory_child_layer_removals_p() {
         let store = MemoryLayerStore::new();
-        child_layer_removals_p(&store, false).await.unwrap();
+        child_layer_removals_p(&store, false).unwrap();
     }
 
-    #[tokio::test]
-    async fn directory_child_layer_removals_p() {
+    #[test]
+    fn directory_child_layer_removals_p() {
         let dir = tempdir().unwrap();
         let store = DirectoryLayerStore::new(dir.path());
-        child_layer_removals_p(&store, false).await.unwrap();
+        child_layer_removals_p(&store, false).unwrap();
     }
 
-    async fn child_layer_removals_o<S: LayerStore>(store: &S, invalidate: bool) -> io::Result<()> {
-        let (name, _layer, _additions, removals) = example_child_layer(store, invalidate).await?;
+    fn child_layer_removals_o<S: LayerStore>(store: &S, invalidate: bool) -> io::Result<()> {
+        let (name, _layer, _additions, removals) = example_child_layer(store, invalidate)?;
 
         let mut triples: Vec<_> = removals
             .iter()
@@ -3423,26 +3440,26 @@ mod tests {
 
         let result: Vec<_> = store
             .triple_removals_o(name, triples[0].object)
-            .await?
+            ?
             .collect();
         assert_eq!(triples, result);
 
-        assert!(store.triple_removals_o(name, 42).await?.next().is_none());
+        assert!(store.triple_removals_o(name, 42)?.next().is_none());
 
         Ok(())
     }
 
-    #[tokio::test]
-    async fn memory_child_layer_removals_o() {
+    #[test]
+    fn memory_child_layer_removals_o() {
         let store = MemoryLayerStore::new();
-        child_layer_removals_o(&store, false).await.unwrap();
+        child_layer_removals_o(&store, false).unwrap();
     }
 
-    #[tokio::test]
-    async fn directory_child_layer_removals_o() {
+    #[test]
+    fn directory_child_layer_removals_o() {
         let dir = tempdir().unwrap();
         let store = DirectoryLayerStore::new(dir.path());
-        child_layer_removals_o(&store, false).await.unwrap();
+        child_layer_removals_o(&store, false).unwrap();
     }
 
     fn make_cached_store() -> (TempDir, CachedLayerStore) {
@@ -3453,255 +3470,255 @@ mod tests {
         (dir, cache)
     }
 
-    #[tokio::test]
-    async fn cached_base_layer_counts() {
+    #[test]
+    fn cached_base_layer_counts() {
         let (_dir, store) = make_cached_store();
-        base_layer_counts(&store, false).await.unwrap();
+        base_layer_counts(&store, false).unwrap();
     }
 
-    #[tokio::test]
-    async fn uncached_base_layer_counts() {
+    #[test]
+    fn uncached_base_layer_counts() {
         let (_dir, store) = make_cached_store();
-        base_layer_counts(&store, true).await.unwrap();
+        base_layer_counts(&store, true).unwrap();
     }
 
-    #[tokio::test]
-    async fn cached_child_layer_counts() {
+    #[test]
+    fn cached_child_layer_counts() {
         let (_dir, store) = make_cached_store();
-        child_layer_counts(&store, false).await.unwrap();
+        child_layer_counts(&store, false).unwrap();
     }
 
-    #[tokio::test]
-    async fn uncached_child_layer_counts() {
+    #[test]
+    fn uncached_child_layer_counts() {
         let (_dir, store) = make_cached_store();
-        child_layer_counts(&store, true).await.unwrap();
+        child_layer_counts(&store, true).unwrap();
     }
 
-    #[tokio::test]
-    async fn cached_base_layer_addition_exists() {
+    #[test]
+    fn cached_base_layer_addition_exists() {
         let (_dir, store) = make_cached_store();
-        base_layer_addition_exists(&store, false).await.unwrap();
+        base_layer_addition_exists(&store, false).unwrap();
     }
 
-    #[tokio::test]
-    async fn uncached_base_layer_addition_exists() {
+    #[test]
+    fn uncached_base_layer_addition_exists() {
         let (_dir, store) = make_cached_store();
-        base_layer_addition_exists(&store, true).await.unwrap();
+        base_layer_addition_exists(&store, true).unwrap();
     }
 
-    #[tokio::test]
-    async fn cached_base_layer_additions() {
+    #[test]
+    fn cached_base_layer_additions() {
         let (_dir, store) = make_cached_store();
-        base_layer_additions(&store, false).await.unwrap();
+        base_layer_additions(&store, false).unwrap();
     }
 
-    #[tokio::test]
-    async fn uncached_base_layer_additions() {
+    #[test]
+    fn uncached_base_layer_additions() {
         let (_dir, store) = make_cached_store();
-        base_layer_additions(&store, true).await.unwrap();
+        base_layer_additions(&store, true).unwrap();
     }
 
-    #[tokio::test]
-    async fn cached_base_layer_additions_s() {
+    #[test]
+    fn cached_base_layer_additions_s() {
         let (_dir, store) = make_cached_store();
-        base_layer_additions_s(&store, false).await.unwrap();
+        base_layer_additions_s(&store, false).unwrap();
     }
 
-    #[tokio::test]
-    async fn uncached_base_layer_additions_s() {
+    #[test]
+    fn uncached_base_layer_additions_s() {
         let (_dir, store) = make_cached_store();
-        base_layer_additions_s(&store, true).await.unwrap();
+        base_layer_additions_s(&store, true).unwrap();
     }
 
-    #[tokio::test]
-    async fn cached_base_layer_additions_sp() {
+    #[test]
+    fn cached_base_layer_additions_sp() {
         let (_dir, store) = make_cached_store();
-        base_layer_additions_sp(&store, false).await.unwrap();
+        base_layer_additions_sp(&store, false).unwrap();
     }
 
-    #[tokio::test]
-    async fn uncached_base_layer_additions_sp() {
+    #[test]
+    fn uncached_base_layer_additions_sp() {
         let (_dir, store) = make_cached_store();
-        base_layer_additions_sp(&store, true).await.unwrap();
+        base_layer_additions_sp(&store, true).unwrap();
     }
 
-    #[tokio::test]
-    async fn cached_base_layer_additions_p() {
+    #[test]
+    fn cached_base_layer_additions_p() {
         let (_dir, store) = make_cached_store();
-        base_layer_additions_p(&store, false).await.unwrap();
+        base_layer_additions_p(&store, false).unwrap();
     }
 
-    #[tokio::test]
-    async fn uncached_base_layer_additions_p() {
+    #[test]
+    fn uncached_base_layer_additions_p() {
         let (_dir, store) = make_cached_store();
-        base_layer_additions_p(&store, true).await.unwrap();
+        base_layer_additions_p(&store, true).unwrap();
     }
 
-    #[tokio::test]
-    async fn cached_base_layer_additions_o() {
+    #[test]
+    fn cached_base_layer_additions_o() {
         let (_dir, store) = make_cached_store();
-        base_layer_additions_o(&store, false).await.unwrap();
+        base_layer_additions_o(&store, false).unwrap();
     }
 
-    #[tokio::test]
-    async fn uncached_base_layer_additions_o() {
+    #[test]
+    fn uncached_base_layer_additions_o() {
         let (_dir, store) = make_cached_store();
-        base_layer_additions_o(&store, true).await.unwrap();
+        base_layer_additions_o(&store, true).unwrap();
     }
 
-    #[tokio::test]
-    async fn cached_base_layer_removals() {
+    #[test]
+    fn cached_base_layer_removals() {
         let (_dir, store) = make_cached_store();
-        base_layer_removals(&store, false).await.unwrap();
+        base_layer_removals(&store, false).unwrap();
     }
 
-    #[tokio::test]
-    async fn uncached_base_layer_removals() {
+    #[test]
+    fn uncached_base_layer_removals() {
         let (_dir, store) = make_cached_store();
-        base_layer_removals(&store, true).await.unwrap();
+        base_layer_removals(&store, true).unwrap();
     }
 
-    #[tokio::test]
-    async fn cached_child_layer_addition_exists() {
+    #[test]
+    fn cached_child_layer_addition_exists() {
         let (_dir, store) = make_cached_store();
-        child_layer_addition_exists(&store, false).await.unwrap();
+        child_layer_addition_exists(&store, false).unwrap();
     }
 
-    #[tokio::test]
-    async fn uncached_child_layer_addition_exists() {
+    #[test]
+    fn uncached_child_layer_addition_exists() {
         let (_dir, store) = make_cached_store();
-        child_layer_addition_exists(&store, true).await.unwrap();
+        child_layer_addition_exists(&store, true).unwrap();
     }
 
-    #[tokio::test]
-    async fn cached_child_layer_additions() {
+    #[test]
+    fn cached_child_layer_additions() {
         let (_dir, store) = make_cached_store();
-        child_layer_additions(&store, false).await.unwrap();
+        child_layer_additions(&store, false).unwrap();
     }
 
-    #[tokio::test]
-    async fn uncached_child_layer_additions() {
+    #[test]
+    fn uncached_child_layer_additions() {
         let (_dir, store) = make_cached_store();
-        child_layer_additions(&store, true).await.unwrap();
+        child_layer_additions(&store, true).unwrap();
     }
 
-    #[tokio::test]
-    async fn cached_child_layer_additions_s() {
+    #[test]
+    fn cached_child_layer_additions_s() {
         let (_dir, store) = make_cached_store();
-        child_layer_additions_s(&store, false).await.unwrap();
+        child_layer_additions_s(&store, false).unwrap();
     }
 
-    #[tokio::test]
-    async fn uncached_child_layer_additions_s() {
+    #[test]
+    fn uncached_child_layer_additions_s() {
         let (_dir, store) = make_cached_store();
-        child_layer_additions_s(&store, true).await.unwrap();
+        child_layer_additions_s(&store, true).unwrap();
     }
 
-    #[tokio::test]
-    async fn cached_child_layer_additions_sp() {
+    #[test]
+    fn cached_child_layer_additions_sp() {
         let (_dir, store) = make_cached_store();
-        child_layer_additions_sp(&store, false).await.unwrap();
+        child_layer_additions_sp(&store, false).unwrap();
     }
 
-    #[tokio::test]
-    async fn uncached_child_layer_additions_sp() {
+    #[test]
+    fn uncached_child_layer_additions_sp() {
         let (_dir, store) = make_cached_store();
-        child_layer_additions_sp(&store, true).await.unwrap();
+        child_layer_additions_sp(&store, true).unwrap();
     }
 
-    #[tokio::test]
-    async fn cached_child_layer_additions_p() {
+    #[test]
+    fn cached_child_layer_additions_p() {
         let (_dir, store) = make_cached_store();
-        child_layer_additions_p(&store, false).await.unwrap();
+        child_layer_additions_p(&store, false).unwrap();
     }
 
-    #[tokio::test]
-    async fn uncached_child_layer_additions_p() {
+    #[test]
+    fn uncached_child_layer_additions_p() {
         let (_dir, store) = make_cached_store();
-        child_layer_additions_p(&store, true).await.unwrap();
+        child_layer_additions_p(&store, true).unwrap();
     }
 
-    #[tokio::test]
-    async fn cached_child_layer_additions_o() {
+    #[test]
+    fn cached_child_layer_additions_o() {
         let (_dir, store) = make_cached_store();
-        child_layer_additions_o(&store, false).await.unwrap();
+        child_layer_additions_o(&store, false).unwrap();
     }
 
-    #[tokio::test]
-    async fn uncached_child_layer_additions_o() {
+    #[test]
+    fn uncached_child_layer_additions_o() {
         let (_dir, store) = make_cached_store();
-        child_layer_additions_o(&store, true).await.unwrap();
+        child_layer_additions_o(&store, true).unwrap();
     }
 
-    #[tokio::test]
-    async fn cached_child_layer_removal_exists() {
+    #[test]
+    fn cached_child_layer_removal_exists() {
         let (_dir, store) = make_cached_store();
-        child_layer_removal_exists(&store, false).await.unwrap();
+        child_layer_removal_exists(&store, false).unwrap();
     }
 
-    #[tokio::test]
-    async fn uncached_child_layer_removal_exists() {
+    #[test]
+    fn uncached_child_layer_removal_exists() {
         let (_dir, store) = make_cached_store();
-        child_layer_removal_exists(&store, true).await.unwrap();
+        child_layer_removal_exists(&store, true).unwrap();
     }
 
-    #[tokio::test]
-    async fn cached_child_layer_removals() {
+    #[test]
+    fn cached_child_layer_removals() {
         let (_dir, store) = make_cached_store();
-        child_layer_removals(&store, false).await.unwrap();
+        child_layer_removals(&store, false).unwrap();
     }
 
-    #[tokio::test]
-    async fn uncached_child_layer_removals() {
+    #[test]
+    fn uncached_child_layer_removals() {
         let (_dir, store) = make_cached_store();
-        child_layer_removals(&store, true).await.unwrap();
+        child_layer_removals(&store, true).unwrap();
     }
 
-    #[tokio::test]
-    async fn cached_child_layer_removals_s() {
+    #[test]
+    fn cached_child_layer_removals_s() {
         let (_dir, store) = make_cached_store();
-        child_layer_removals_s(&store, false).await.unwrap();
+        child_layer_removals_s(&store, false).unwrap();
     }
 
-    #[tokio::test]
-    async fn uncached_child_layer_removals_s() {
+    #[test]
+    fn uncached_child_layer_removals_s() {
         let (_dir, store) = make_cached_store();
-        child_layer_removals_s(&store, true).await.unwrap();
+        child_layer_removals_s(&store, true).unwrap();
     }
 
-    #[tokio::test]
-    async fn cached_child_layer_removals_sp() {
+    #[test]
+    fn cached_child_layer_removals_sp() {
         let (_dir, store) = make_cached_store();
-        child_layer_removals_sp(&store, false).await.unwrap();
+        child_layer_removals_sp(&store, false).unwrap();
     }
 
-    #[tokio::test]
-    async fn uncached_child_layer_removals_sp() {
+    #[test]
+    fn uncached_child_layer_removals_sp() {
         let (_dir, store) = make_cached_store();
-        child_layer_removals_sp(&store, true).await.unwrap();
+        child_layer_removals_sp(&store, true).unwrap();
     }
 
-    #[tokio::test]
-    async fn cached_child_layer_removals_p() {
+    #[test]
+    fn cached_child_layer_removals_p() {
         let (_dir, store) = make_cached_store();
-        child_layer_removals_p(&store, false).await.unwrap();
+        child_layer_removals_p(&store, false).unwrap();
     }
 
-    #[tokio::test]
-    async fn uncached_child_layer_removals_p() {
+    #[test]
+    fn uncached_child_layer_removals_p() {
         let (_dir, store) = make_cached_store();
-        child_layer_removals_p(&store, true).await.unwrap();
+        child_layer_removals_p(&store, true).unwrap();
     }
 
-    #[tokio::test]
-    async fn cached_child_layer_removals_o() {
+    #[test]
+    fn cached_child_layer_removals_o() {
         let (_dir, store) = make_cached_store();
-        child_layer_removals_o(&store, false).await.unwrap();
+        child_layer_removals_o(&store, false).unwrap();
     }
 
-    #[tokio::test]
-    async fn uncached_child_layer_removals_o() {
+    #[test]
+    fn uncached_child_layer_removals_o() {
         let (_dir, store) = make_cached_store();
-        child_layer_removals_o(&store, true).await.unwrap();
+        child_layer_removals_o(&store, true).unwrap();
     }
 }

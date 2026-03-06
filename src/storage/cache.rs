@@ -1,11 +1,10 @@
 use super::layer::*;
 use crate::layer::*;
-use async_trait::async_trait;
 use std::collections::HashMap;
 use std::io;
 use std::path::Path;
 use std::sync::{Arc, RwLock, Weak};
-use tdb_succinct::{StringDict, TypedDict};
+use tdb_succinct_wasm::{StringDict, TypedDict};
 
 pub trait LayerCache: 'static + Send + Sync {
     fn get_layer_from_cache(&self, name: [u32; 5]) -> Option<Arc<InternalLayer>>;
@@ -26,9 +25,9 @@ impl LayerCache for NoCache {
     fn invalidate(&self, _name: [u32; 5]) {}
 }
 
-lazy_static! {
-    pub static ref NOCACHE: Arc<dyn LayerCache> = Arc::new(NoCache);
-}
+use std::sync::LazyLock;
+
+pub static NOCACHE: LazyLock<Arc<dyn LayerCache>> = LazyLock::new(|| Arc::new(NoCache));
 
 // locking isn't really ideal but the lock window will be relatively small so it shouldn't hurt performance too much except on heavy updates.
 // ideally we should be using some concurrent hashmap implementation instead.
@@ -107,40 +106,39 @@ impl CachedLayerStore {
     }
 }
 
-#[async_trait]
 impl LayerStore for CachedLayerStore {
-    async fn layers(&self) -> io::Result<Vec<[u32; 5]>> {
-        self.inner.layers().await
+    fn layers(&self) -> io::Result<Vec<[u32; 5]>> {
+        self.inner.layers()
     }
 
-    async fn get_layer(&self, name: [u32; 5]) -> io::Result<Option<Arc<InternalLayer>>> {
+    fn get_layer(&self, name: [u32; 5]) -> io::Result<Option<Arc<InternalLayer>>> {
         self.inner
             .get_layer_with_cache(name, self.cache.clone())
-            .await
+            
     }
 
-    async fn get_layer_with_cache(
+    fn get_layer_with_cache(
         &self,
         name: [u32; 5],
         cache: Arc<dyn LayerCache>,
     ) -> io::Result<Option<Arc<InternalLayer>>> {
-        self.inner.get_layer_with_cache(name, cache).await
+        self.inner.get_layer_with_cache(name, cache)
     }
 
-    async fn finalize_layer(&self, name: [u32; 5]) -> io::Result<()> {
-        self.inner.finalize_layer(name).await
+    fn finalize_layer(&self, name: [u32; 5]) -> io::Result<()> {
+        self.inner.finalize_layer(name)
     }
 
-    async fn get_layer_parent_name(&self, name: [u32; 5]) -> io::Result<Option<[u32; 5]>> {
+    fn get_layer_parent_name(&self, name: [u32; 5]) -> io::Result<Option<[u32; 5]>> {
         // is layer in cache? if so, we can use the cached version
         if let Some(layer) = self.cache.get_layer_from_cache(name) {
             Ok(layer.parent_name())
         } else {
-            self.inner.get_layer_parent_name(name).await
+            self.inner.get_layer_parent_name(name)
         }
     }
 
-    async fn get_node_dictionary(&self, name: [u32; 5]) -> io::Result<Option<StringDict>> {
+    fn get_node_dictionary(&self, name: [u32; 5]) -> io::Result<Option<StringDict>> {
         // is layer in cache? if so, we can use the cached version
         if let Some(layer) = self.cache.get_layer_from_cache(name) {
             // unless it is a rollup
@@ -149,10 +147,10 @@ impl LayerStore for CachedLayerStore {
             }
         }
 
-        self.inner.get_node_dictionary(name).await
+        self.inner.get_node_dictionary(name)
     }
 
-    async fn get_predicate_dictionary(&self, name: [u32; 5]) -> io::Result<Option<StringDict>> {
+    fn get_predicate_dictionary(&self, name: [u32; 5]) -> io::Result<Option<StringDict>> {
         // is layer in cache? if so, we can use the cached version
         if let Some(layer) = self.cache.get_layer_from_cache(name) {
             // unless it is a rollup
@@ -161,10 +159,10 @@ impl LayerStore for CachedLayerStore {
             }
         }
 
-        self.inner.get_predicate_dictionary(name).await
+        self.inner.get_predicate_dictionary(name)
     }
 
-    async fn get_value_dictionary(&self, name: [u32; 5]) -> io::Result<Option<TypedDict>> {
+    fn get_value_dictionary(&self, name: [u32; 5]) -> io::Result<Option<TypedDict>> {
         // is layer in cache? if so, we can use the cached version
         if let Some(layer) = self.cache.get_layer_from_cache(name) {
             // unless it is a rollup
@@ -173,10 +171,10 @@ impl LayerStore for CachedLayerStore {
             }
         }
 
-        self.inner.get_value_dictionary(name).await
+        self.inner.get_value_dictionary(name)
     }
 
-    async fn get_node_count(&self, name: [u32; 5]) -> io::Result<Option<u64>> {
+    fn get_node_count(&self, name: [u32; 5]) -> io::Result<Option<u64>> {
         // is layer in cache? if so, we can use the cached version
         if let Some(layer) = self.cache.get_layer_from_cache(name) {
             // unless it is a rollup
@@ -185,10 +183,10 @@ impl LayerStore for CachedLayerStore {
             }
         }
 
-        self.inner.get_node_count(name).await
+        self.inner.get_node_count(name)
     }
 
-    async fn get_predicate_count(&self, name: [u32; 5]) -> io::Result<Option<u64>> {
+    fn get_predicate_count(&self, name: [u32; 5]) -> io::Result<Option<u64>> {
         // is layer in cache? if so, we can use the cached version
         if let Some(layer) = self.cache.get_layer_from_cache(name) {
             // unless it is a rollup
@@ -197,10 +195,10 @@ impl LayerStore for CachedLayerStore {
             }
         }
 
-        self.inner.get_value_count(name).await
+        self.inner.get_value_count(name)
     }
 
-    async fn get_value_count(&self, name: [u32; 5]) -> io::Result<Option<u64>> {
+    fn get_value_count(&self, name: [u32; 5]) -> io::Result<Option<u64>> {
         // is layer in cache? if so, we can use the cached version
         if let Some(layer) = self.cache.get_layer_from_cache(name) {
             // unless it is a rollup
@@ -209,10 +207,10 @@ impl LayerStore for CachedLayerStore {
             }
         }
 
-        self.inner.get_value_count(name).await
+        self.inner.get_value_count(name)
     }
 
-    async fn get_node_value_idmap(&self, name: [u32; 5]) -> io::Result<Option<IdMap>> {
+    fn get_node_value_idmap(&self, name: [u32; 5]) -> io::Result<Option<IdMap>> {
         // is layer in cache? if so, we can use the cached version
         if let Some(layer) = self.cache.get_layer_from_cache(name) {
             // unless it is a rollup
@@ -221,10 +219,10 @@ impl LayerStore for CachedLayerStore {
             }
         }
 
-        self.inner.get_node_value_idmap(name).await
+        self.inner.get_node_value_idmap(name)
     }
 
-    async fn get_predicate_idmap(&self, name: [u32; 5]) -> io::Result<Option<IdMap>> {
+    fn get_predicate_idmap(&self, name: [u32; 5]) -> io::Result<Option<IdMap>> {
         // is layer in cache? if so, we can use the cached version
         if let Some(layer) = self.cache.get_layer_from_cache(name) {
             // unless it is a rollup
@@ -233,34 +231,34 @@ impl LayerStore for CachedLayerStore {
             }
         }
 
-        self.inner.get_predicate_idmap(name).await
+        self.inner.get_predicate_idmap(name)
     }
 
-    async fn create_base_layer(&self) -> io::Result<Box<dyn LayerBuilder>> {
-        self.inner.create_base_layer().await
+    fn create_base_layer(&self) -> io::Result<Box<dyn LayerBuilder>> {
+        self.inner.create_base_layer()
     }
 
-    async fn create_child_layer(&self, parent: [u32; 5]) -> io::Result<Box<dyn LayerBuilder>> {
+    fn create_child_layer(&self, parent: [u32; 5]) -> io::Result<Box<dyn LayerBuilder>> {
         self.inner
             .create_child_layer_with_cache(parent, self.cache.clone())
-            .await
+            
     }
 
-    async fn create_child_layer_with_cache(
+    fn create_child_layer_with_cache(
         &self,
         parent: [u32; 5],
         cache: Arc<dyn LayerCache>,
     ) -> io::Result<Box<dyn LayerBuilder>> {
         self.inner
             .create_child_layer_with_cache(parent, cache)
-            .await
+            
     }
 
-    async fn perform_rollup(&self, layer: Arc<InternalLayer>) -> io::Result<[u32; 5]> {
-        self.inner.perform_rollup(layer).await
+    fn perform_rollup(&self, layer: Arc<InternalLayer>) -> io::Result<[u32; 5]> {
+        self.inner.perform_rollup(layer)
     }
 
-    async fn perform_rollup_upto_with_cache(
+    fn perform_rollup_upto_with_cache(
         &self,
         layer: Arc<InternalLayer>,
         upto: [u32; 5],
@@ -268,20 +266,20 @@ impl LayerStore for CachedLayerStore {
     ) -> io::Result<[u32; 5]> {
         self.inner
             .perform_rollup_upto_with_cache(layer, upto, cache)
-            .await
+            
     }
 
-    async fn perform_rollup_upto(
+    fn perform_rollup_upto(
         &self,
         layer: Arc<InternalLayer>,
         upto: [u32; 5],
     ) -> io::Result<[u32; 5]> {
         self.inner
             .perform_rollup_upto_with_cache(layer, upto, self.cache.clone())
-            .await
+            
     }
 
-    async fn perform_imprecise_rollup_upto_with_cache(
+    fn perform_imprecise_rollup_upto_with_cache(
         &self,
         layer: Arc<InternalLayer>,
         upto: [u32; 5],
@@ -289,54 +287,54 @@ impl LayerStore for CachedLayerStore {
     ) -> io::Result<[u32; 5]> {
         self.inner
             .perform_imprecise_rollup_upto_with_cache(layer, upto, cache)
-            .await
+            
     }
 
-    async fn perform_imprecise_rollup_upto(
+    fn perform_imprecise_rollup_upto(
         &self,
         layer: Arc<InternalLayer>,
         upto: [u32; 5],
     ) -> io::Result<[u32; 5]> {
         self.inner
             .perform_imprecise_rollup_upto_with_cache(layer, upto, self.cache.clone())
-            .await
+            
     }
 
-    async fn register_rollup(&self, layer: [u32; 5], rollup: [u32; 5]) -> io::Result<()> {
+    fn register_rollup(&self, layer: [u32; 5], rollup: [u32; 5]) -> io::Result<()> {
         // when registering a rollup layer, we need to make sure that
         // the cached version is updated as well.
-        self.inner.register_rollup(layer, rollup).await?;
+        self.inner.register_rollup(layer, rollup)?;
         self.cache.invalidate(layer);
 
         Ok(())
     }
 
-    async fn rollup_upto(&self, layer: Arc<InternalLayer>, upto: [u32; 5]) -> io::Result<[u32; 5]> {
+    fn rollup_upto(&self, layer: Arc<InternalLayer>, upto: [u32; 5]) -> io::Result<[u32; 5]> {
         let cache = self.cache.clone();
-        self.rollup_upto_with_cache(layer, upto, cache).await
+        self.rollup_upto_with_cache(layer, upto, cache)
     }
 
-    async fn squash(&self, layer: Arc<InternalLayer>) -> io::Result<[u32; 5]> {
-        self.inner.squash(layer).await
+    fn squash(&self, layer: Arc<InternalLayer>) -> io::Result<[u32; 5]> {
+        self.inner.squash(layer)
     }
 
-    async fn squash_upto(&self, layer: Arc<InternalLayer>, upto: [u32; 5]) -> io::Result<[u32; 5]> {
-        self.inner.squash_upto(layer, upto).await
+    fn squash_upto(&self, layer: Arc<InternalLayer>, upto: [u32; 5]) -> io::Result<[u32; 5]> {
+        self.inner.squash_upto(layer, upto)
     }
 
-    async fn merge_base_layer(&self, layers: &[[u32; 5]], temp_dir: &Path) -> io::Result<[u32; 5]> {
-        self.inner.merge_base_layer(layers, temp_dir).await
+    fn merge_base_layer(&self, layers: &[[u32; 5]], temp_dir: &Path) -> io::Result<[u32; 5]> {
+        self.inner.merge_base_layer(layers, temp_dir)
     }
 
-    async fn layer_is_ancestor_of(
+    fn layer_is_ancestor_of(
         &self,
         descendant: [u32; 5],
         ancestor: [u32; 5],
     ) -> io::Result<bool> {
-        self.inner.layer_is_ancestor_of(descendant, ancestor).await
+        self.inner.layer_is_ancestor_of(descendant, ancestor)
     }
 
-    async fn triple_addition_exists(
+    fn triple_addition_exists(
         &self,
         layer: [u32; 5],
         subject: u64,
@@ -351,10 +349,10 @@ impl LayerStore for CachedLayerStore {
 
         self.inner
             .triple_addition_exists(layer, subject, predicate, object)
-            .await
+            
     }
 
-    async fn triple_removal_exists(
+    fn triple_removal_exists(
         &self,
         layer: [u32; 5],
         subject: u64,
@@ -369,10 +367,10 @@ impl LayerStore for CachedLayerStore {
 
         self.inner
             .triple_removal_exists(layer, subject, predicate, object)
-            .await
+            
     }
 
-    async fn triple_additions(
+    fn triple_additions(
         &self,
         layer: [u32; 5],
     ) -> io::Result<OptInternalLayerTripleSubjectIterator> {
@@ -382,10 +380,10 @@ impl LayerStore for CachedLayerStore {
             }
         }
 
-        self.inner.triple_additions(layer).await
+        self.inner.triple_additions(layer)
     }
 
-    async fn triple_removals(
+    fn triple_removals(
         &self,
         layer: [u32; 5],
     ) -> io::Result<OptInternalLayerTripleSubjectIterator> {
@@ -395,10 +393,10 @@ impl LayerStore for CachedLayerStore {
             }
         }
 
-        self.inner.triple_removals(layer).await
+        self.inner.triple_removals(layer)
     }
 
-    async fn triple_additions_s(
+    fn triple_additions_s(
         &self,
         layer: [u32; 5],
         subject: u64,
@@ -409,10 +407,10 @@ impl LayerStore for CachedLayerStore {
             }
         }
 
-        self.inner.triple_additions_s(layer, subject).await
+        self.inner.triple_additions_s(layer, subject)
     }
 
-    async fn triple_removals_s(
+    fn triple_removals_s(
         &self,
         layer: [u32; 5],
         subject: u64,
@@ -423,10 +421,10 @@ impl LayerStore for CachedLayerStore {
             }
         }
 
-        self.inner.triple_removals_s(layer, subject).await
+        self.inner.triple_removals_s(layer, subject)
     }
 
-    async fn triple_additions_sp(
+    fn triple_additions_sp(
         &self,
         layer: [u32; 5],
         subject: u64,
@@ -440,10 +438,10 @@ impl LayerStore for CachedLayerStore {
 
         self.inner
             .triple_additions_sp(layer, subject, predicate)
-            .await
+            
     }
 
-    async fn triple_removals_sp(
+    fn triple_removals_sp(
         &self,
         layer: [u32; 5],
         subject: u64,
@@ -457,10 +455,10 @@ impl LayerStore for CachedLayerStore {
 
         self.inner
             .triple_removals_sp(layer, subject, predicate)
-            .await
+            
     }
 
-    async fn triple_additions_p(
+    fn triple_additions_p(
         &self,
         layer: [u32; 5],
         predicate: u64,
@@ -472,10 +470,10 @@ impl LayerStore for CachedLayerStore {
             }
         }
 
-        self.inner.triple_additions_p(layer, predicate).await
+        self.inner.triple_additions_p(layer, predicate)
     }
 
-    async fn triple_removals_p(
+    fn triple_removals_p(
         &self,
         layer: [u32; 5],
         predicate: u64,
@@ -487,10 +485,10 @@ impl LayerStore for CachedLayerStore {
             }
         }
 
-        self.inner.triple_removals_p(layer, predicate).await
+        self.inner.triple_removals_p(layer, predicate)
     }
 
-    async fn triple_additions_o(
+    fn triple_additions_o(
         &self,
         layer: [u32; 5],
         object: u64,
@@ -501,10 +499,10 @@ impl LayerStore for CachedLayerStore {
             }
         }
 
-        self.inner.triple_additions_o(layer, object).await
+        self.inner.triple_additions_o(layer, object)
     }
 
-    async fn triple_removals_o(
+    fn triple_removals_o(
         &self,
         layer: [u32; 5],
         object: u64,
@@ -515,39 +513,39 @@ impl LayerStore for CachedLayerStore {
             }
         }
 
-        self.inner.triple_removals_o(layer, object).await
+        self.inner.triple_removals_o(layer, object)
     }
 
-    async fn triple_layer_addition_count(&self, layer: [u32; 5]) -> io::Result<usize> {
+    fn triple_layer_addition_count(&self, layer: [u32; 5]) -> io::Result<usize> {
         if let Some(cached) = self.cache.get_layer_from_cache(layer) {
             if !cached.is_rollup() {
                 return Ok(cached.internal_triple_layer_addition_count());
             }
         }
 
-        self.inner.triple_layer_addition_count(layer).await
+        self.inner.triple_layer_addition_count(layer)
     }
 
-    async fn triple_layer_removal_count(&self, layer: [u32; 5]) -> io::Result<usize> {
+    fn triple_layer_removal_count(&self, layer: [u32; 5]) -> io::Result<usize> {
         if let Some(cached) = self.cache.get_layer_from_cache(layer) {
             if !cached.is_rollup() {
                 return Ok(cached.internal_triple_layer_removal_count());
             }
         }
 
-        self.inner.triple_layer_removal_count(layer).await
+        self.inner.triple_layer_removal_count(layer)
     }
 
-    async fn retrieve_layer_stack_names(&self, name: [u32; 5]) -> io::Result<Vec<[u32; 5]>> {
-        self.inner.retrieve_layer_stack_names(name).await
+    fn retrieve_layer_stack_names(&self, name: [u32; 5]) -> io::Result<Vec<[u32; 5]>> {
+        self.inner.retrieve_layer_stack_names(name)
     }
 
-    async fn retrieve_layer_stack_names_upto(
+    fn retrieve_layer_stack_names_upto(
         &self,
         name: [u32; 5],
         upto: [u32; 5],
     ) -> io::Result<Vec<[u32; 5]>> {
-        self.inner.retrieve_layer_stack_names_upto(name, upto).await
+        self.inner.retrieve_layer_stack_names_upto(name, upto)
     }
 }
 
@@ -556,7 +554,29 @@ pub mod tests {
     use super::*;
     use crate::storage::directory::*;
     use crate::storage::memory::*;
-    use tempfile::tempdir;
+
+    /// Simple temp directory helper that cleans up on drop (replaces tempfile::tempdir)
+    struct TempDir(std::path::PathBuf);
+    impl TempDir {
+        fn new() -> io::Result<Self> {
+            let mut path = std::env::temp_dir();
+            let random_name: [u32; 2] = rand::random();
+            path.push(format!("terminus-test-{:08x}{:08x}", random_name[0], random_name[1]));
+            std::fs::create_dir_all(&path)?;
+            Ok(TempDir(path))
+        }
+        fn path(&self) -> &std::path::Path {
+            &self.0
+        }
+    }
+    impl Drop for TempDir {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+    fn tempdir() -> io::Result<TempDir> {
+        TempDir::new()
+    }
 
     fn cached_layer_eq(layer1: &dyn Layer, layer2: &dyn Layer) -> bool {
         // a trait object consists of two parts, a pointer to the concrete data, followed by a vtable.
@@ -568,83 +588,83 @@ pub mod tests {
         }
     }
 
-    #[tokio::test]
-    async fn cached_memory_layer_store_returns_same_layer_multiple_times() {
+    #[test]
+    fn cached_memory_layer_store_returns_same_layer_multiple_times() {
         let store = CachedLayerStore::new(MemoryLayerStore::new(), LockingHashMapLayerCache::new());
-        let mut builder = store.create_base_layer().await.unwrap();
+        let mut builder = store.create_base_layer().unwrap();
         let base_name = builder.name();
 
         builder.add_value_triple(ValueTriple::new_string_value("cow", "says", "moo"));
         builder.add_value_triple(ValueTriple::new_string_value("pig", "says", "oink"));
         builder.add_value_triple(ValueTriple::new_string_value("duck", "says", "quack"));
 
-        builder.commit_boxed().await.unwrap();
+        builder.commit_boxed().unwrap();
 
-        builder = store.create_child_layer(base_name).await.unwrap();
+        builder = store.create_child_layer(base_name).unwrap();
         let child_name = builder.name();
 
         builder.remove_value_triple(ValueTriple::new_string_value("duck", "says", "quack"));
         builder.add_value_triple(ValueTriple::new_node("cow", "likes", "pig"));
 
-        builder.commit_boxed().await.unwrap();
+        builder.commit_boxed().unwrap();
 
-        let layer1 = store.get_layer(child_name).await.unwrap().unwrap();
-        let layer2 = store.get_layer(child_name).await.unwrap().unwrap();
+        let layer1 = store.get_layer(child_name).unwrap().unwrap();
+        let layer2 = store.get_layer(child_name).unwrap().unwrap();
 
         let base_layer = store.cache.get_layer_from_cache(base_name).unwrap();
-        let base_layer_2 = store.get_layer(base_name).await.unwrap().unwrap();
+        let base_layer_2 = store.get_layer(base_name).unwrap().unwrap();
 
         assert!(cached_layer_eq(&*layer1, &*layer2));
         assert!(cached_layer_eq(&*base_layer, &*base_layer_2));
     }
 
-    #[tokio::test]
-    async fn cached_directory_layer_store_returns_same_layer_multiple_times() {
+    #[test]
+    fn cached_directory_layer_store_returns_same_layer_multiple_times() {
         let dir = tempdir().unwrap();
         let store = CachedLayerStore::new(
             DirectoryLayerStore::new(dir.path()),
             LockingHashMapLayerCache::new(),
         );
-        let mut builder = store.create_base_layer().await.unwrap();
+        let mut builder = store.create_base_layer().unwrap();
         let base_name = builder.name();
 
         builder.add_value_triple(ValueTriple::new_string_value("cow", "says", "moo"));
         builder.add_value_triple(ValueTriple::new_string_value("pig", "says", "oink"));
         builder.add_value_triple(ValueTriple::new_string_value("duck", "says", "quack"));
 
-        builder.commit_boxed().await.unwrap();
+        builder.commit_boxed().unwrap();
 
-        builder = store.create_child_layer(base_name).await.unwrap();
+        builder = store.create_child_layer(base_name).unwrap();
         let child_name = builder.name();
 
         builder.remove_value_triple(ValueTriple::new_string_value("duck", "says", "quack"));
         builder.add_value_triple(ValueTriple::new_node("cow", "likes", "pig"));
 
-        builder.commit_boxed().await.unwrap();
+        builder.commit_boxed().unwrap();
 
-        let layer1 = store.get_layer(child_name).await.unwrap().unwrap();
-        let layer2 = store.get_layer(child_name).await.unwrap().unwrap();
+        let layer1 = store.get_layer(child_name).unwrap().unwrap();
+        let layer2 = store.get_layer(child_name).unwrap().unwrap();
 
         let base_layer = store.cache.get_layer_from_cache(base_name).unwrap();
-        let base_layer_2 = store.get_layer(base_name).await.unwrap().unwrap();
+        let base_layer_2 = store.get_layer(base_name).unwrap().unwrap();
 
         assert!(cached_layer_eq(&*layer1, &*layer2));
         assert!(cached_layer_eq(&*base_layer, &*base_layer_2));
     }
 
-    #[tokio::test]
-    async fn cached_layer_store_forgets_entries_when_they_are_dropped() {
+    #[test]
+    fn cached_layer_store_forgets_entries_when_they_are_dropped() {
         let store = CachedLayerStore::new(MemoryLayerStore::new(), LockingHashMapLayerCache::new());
-        let mut builder = store.create_base_layer().await.unwrap();
+        let mut builder = store.create_base_layer().unwrap();
         let base_name = builder.name();
 
         builder.add_value_triple(ValueTriple::new_string_value("cow", "says", "moo"));
         builder.add_value_triple(ValueTriple::new_string_value("pig", "says", "oink"));
         builder.add_value_triple(ValueTriple::new_string_value("duck", "says", "quack"));
 
-        builder.commit_boxed().await.unwrap();
+        builder.commit_boxed().unwrap();
 
-        let layer = store.get_layer(base_name).await.unwrap().unwrap();
+        let layer = store.get_layer(base_name).unwrap().unwrap();
         let weak = Arc::downgrade(&layer);
 
         // we expect 2 weak pointers, the one we made above and the one stored in cache
@@ -657,7 +677,7 @@ pub mod tests {
         assert!(weak.upgrade().is_none());
 
         // retrieving the same layer again works just fine
-        let layer = store.get_layer(base_name).await.unwrap().unwrap();
+        let layer = store.get_layer(base_name).unwrap().unwrap();
 
         // and only has one weak pointer pointing to it, the newly cached one
         assert_eq!(1, Arc::weak_count(&layer));

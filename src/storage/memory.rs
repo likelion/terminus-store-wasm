@@ -2,18 +2,18 @@
 
 use std::collections::HashMap;
 use std::io;
+use std::sync::{Arc, RwLock};
 
-use async_trait::async_trait;
 
 use super::file::*;
 use super::label::*;
 use super::layer::*;
 
-pub use tdb_succinct::storage::memory::*;
+pub use tdb_succinct_wasm::storage::memory::*;
 
 #[derive(Clone, Default)]
 pub struct MemoryLayerStore {
-    layers: futures_locks::RwLock<HashMap<[u32; 5], HashMap<String, MemoryBackedStore>>>,
+    layers: Arc<RwLock<HashMap<[u32; 5], HashMap<String, MemoryBackedStore>>>>,
 }
 
 impl MemoryLayerStore {
@@ -22,32 +22,31 @@ impl MemoryLayerStore {
     }
 }
 
-#[async_trait]
 impl PersistentLayerStore for MemoryLayerStore {
     type File = MemoryBackedStore;
 
-    async fn directories(&self) -> io::Result<Vec<[u32; 5]>> {
-        let guard = self.layers.read().await;
+    fn directories(&self) -> io::Result<Vec<[u32; 5]>> {
+        let guard = self.layers.read().unwrap();
         Ok(guard.keys().cloned().collect())
     }
 
-    async fn create_named_directory(&self, name: [u32; 5]) -> io::Result<[u32; 5]> {
-        let mut guard = self.layers.write().await;
+    fn create_named_directory(&self, name: [u32; 5]) -> io::Result<[u32; 5]> {
+        let mut guard = self.layers.write().unwrap();
         guard.insert(name, HashMap::new());
 
         Ok(name)
     }
 
-    async fn directory_exists(&self, name: [u32; 5]) -> io::Result<bool> {
-        let guard = self.layers.read().await;
+    fn directory_exists(&self, name: [u32; 5]) -> io::Result<bool> {
+        let guard = self.layers.read().unwrap();
         Ok(guard.contains_key(&name))
     }
 
-    async fn file_exists(&self, directory: [u32; 5], file: &str) -> io::Result<bool> {
-        let guard = self.layers.read().await;
+    fn file_exists(&self, directory: [u32; 5], file: &str) -> io::Result<bool> {
+        let guard = self.layers.read().unwrap();
         if let Some(files) = guard.get(&directory) {
             if let Some(file) = files.get(file) {
-                file.exists().await
+                file.exists()
             } else {
                 Ok(false)
             }
@@ -56,14 +55,14 @@ impl PersistentLayerStore for MemoryLayerStore {
         }
     }
 
-    async fn get_file(&self, directory: [u32; 5], name: &str) -> io::Result<Self::File> {
-        let guard = self.layers.read().await;
+    fn get_file(&self, directory: [u32; 5], name: &str) -> io::Result<Self::File> {
+        let guard = self.layers.read().unwrap();
         if let Some(files) = guard.get(&directory) {
             if let Some(file) = files.get(name) {
                 Ok(file.clone())
             } else {
                 std::mem::drop(guard); // release read lock cause it is time to write
-                let mut guard = self.layers.write().await;
+                let mut guard = self.layers.write().unwrap();
                 let files = guard.get_mut(&directory).unwrap();
                 let file = MemoryBackedStore::new();
                 let result = file.clone();
@@ -78,7 +77,7 @@ impl PersistentLayerStore for MemoryLayerStore {
 
 #[derive(Clone, Default)]
 pub struct MemoryLabelStore {
-    labels: futures_locks::RwLock<HashMap<String, Label>>,
+    labels: Arc<RwLock<HashMap<String, Label>>>,
 }
 
 impl MemoryLabelStore {
@@ -87,17 +86,16 @@ impl MemoryLabelStore {
     }
 }
 
-#[async_trait]
 impl LabelStore for MemoryLabelStore {
-    async fn labels(&self) -> io::Result<Vec<Label>> {
-        let labels = self.labels.read().await;
+    fn labels(&self) -> io::Result<Vec<Label>> {
+        let labels = self.labels.read().unwrap();
         Ok(labels.values().cloned().collect())
     }
 
-    async fn create_label(&self, name: &str) -> io::Result<Label> {
+    fn create_label(&self, name: &str) -> io::Result<Label> {
         let label = Label::new_empty(name);
 
-        let mut labels = self.labels.write().await;
+        let mut labels = self.labels.write().unwrap();
         if labels.get(&label.name).is_some() {
             Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidInput,
@@ -109,20 +107,20 @@ impl LabelStore for MemoryLabelStore {
         }
     }
 
-    async fn get_label(&self, name: &str) -> io::Result<Option<Label>> {
+    fn get_label(&self, name: &str) -> io::Result<Option<Label>> {
         let name = name.to_owned();
-        let labels = self.labels.read().await;
+        let labels = self.labels.read().unwrap();
         Ok(labels.get(&name).cloned())
     }
 
-    async fn set_label_option(
+    fn set_label_option(
         &self,
         label: &Label,
         layer: Option<[u32; 5]>,
     ) -> io::Result<Option<Label>> {
         let new_label = label.with_updated_layer(layer);
 
-        let mut labels = self.labels.write().await;
+        let mut labels = self.labels.write().unwrap();
 
         match labels.get(&new_label.name) {
             None => Err(std::io::Error::new(
@@ -141,8 +139,8 @@ impl LabelStore for MemoryLabelStore {
         }
     }
 
-    async fn delete_label(&self, name: &str) -> io::Result<bool> {
-        let mut labels = self.labels.write().await;
+    fn delete_label(&self, name: &str) -> io::Result<bool> {
+        let mut labels = self.labels.write().unwrap();
 
         Ok(labels.remove(name).is_some())
     }
@@ -315,57 +313,57 @@ pub fn child_layer_memory_files() -> ChildLayerFiles<MemoryBackedStore> {
 mod tests {
     use super::*;
     use crate::layer::*;
-    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use std::io::{Read, Write};
 
-    #[tokio::test]
-    async fn write_and_read_memory_backed() {
+    #[test]
+    fn write_and_read_memory_backed() {
         let file = MemoryBackedStore::new();
 
-        let mut w = file.open_write().await.unwrap();
-        w.write_all(&[1, 2, 3]).await.unwrap();
-        w.sync_all().await.unwrap();
+        let mut w = file.open_write().unwrap();
+        w.write_all(&[1, 2, 3]).unwrap();
+        w.sync_all().unwrap();
         let mut buf = Vec::new();
         file.open_read()
-            .await
+            
             .unwrap()
             .read_to_end(&mut buf)
-            .await
+            
             .unwrap();
 
         assert_eq!(vec![1, 2, 3], buf);
     }
 
-    #[tokio::test]
-    async fn write_and_map_memory_backed() {
+    #[test]
+    fn write_and_map_memory_backed() {
         let file = MemoryBackedStore::new();
 
-        let mut w = file.open_write().await.unwrap();
-        w.write_all(&[1, 2, 3]).await.unwrap();
-        w.sync_all().await.unwrap();
-        let map = file.map().await.unwrap();
+        let mut w = file.open_write().unwrap();
+        w.write_all(&[1, 2, 3]).unwrap();
+        w.sync_all().unwrap();
+        let map = file.map().unwrap();
 
         assert_eq!(vec![1, 2, 3], map.as_ref());
     }
 
-    #[tokio::test]
-    async fn create_layers_from_memory_store() {
+    #[test]
+    fn create_layers_from_memory_store() {
         let store = MemoryLayerStore::new();
-        let mut builder = store.create_base_layer().await.unwrap();
+        let mut builder = store.create_base_layer().unwrap();
         let base_name = builder.name();
 
         builder.add_value_triple(ValueTriple::new_string_value("cow", "says", "moo"));
         builder.add_value_triple(ValueTriple::new_string_value("pig", "says", "oink"));
         builder.add_value_triple(ValueTriple::new_string_value("duck", "says", "quack"));
 
-        builder.commit_boxed().await.unwrap();
-        builder = store.create_child_layer(base_name).await.unwrap();
+        builder.commit_boxed().unwrap();
+        builder = store.create_child_layer(base_name).unwrap();
         let child_name = builder.name();
 
         builder.remove_value_triple(ValueTriple::new_string_value("duck", "says", "quack"));
         builder.add_value_triple(ValueTriple::new_node("cow", "likes", "pig"));
 
-        builder.commit_boxed().await.unwrap();
-        let layer = store.get_layer(child_name).await.unwrap().unwrap();
+        builder.commit_boxed().unwrap();
+        let layer = store.get_layer(child_name).unwrap().unwrap();
 
         assert!(layer.value_triple_exists(&ValueTriple::new_string_value("cow", "says", "moo")));
         assert!(layer.value_triple_exists(&ValueTriple::new_string_value("pig", "says", "oink")));
@@ -373,79 +371,79 @@ mod tests {
         assert!(!layer.value_triple_exists(&ValueTriple::new_string_value("duck", "says", "quack")));
     }
 
-    #[tokio::test]
-    async fn memory_create_and_retrieve_equal_label() {
+    #[test]
+    fn memory_create_and_retrieve_equal_label() {
         let store = MemoryLabelStore::new();
-        let foo = store.create_label("foo").await.unwrap();
-        assert_eq!(foo, store.get_label("foo").await.unwrap().unwrap());
+        let foo = store.create_label("foo").unwrap();
+        assert_eq!(foo, store.get_label("foo").unwrap().unwrap());
     }
 
-    #[tokio::test]
-    async fn memory_update_label_succeeds() {
+    #[test]
+    fn memory_update_label_succeeds() {
         let store = MemoryLabelStore::new();
-        let foo = store.create_label("foo").await.unwrap();
+        let foo = store.create_label("foo").unwrap();
 
         assert_eq!(
             1,
             store
                 .set_label(&foo, [6, 7, 8, 9, 10])
-                .await
+                
                 .unwrap()
                 .unwrap()
                 .version
         );
 
-        assert_eq!(1, store.get_label("foo").await.unwrap().unwrap().version);
+        assert_eq!(1, store.get_label("foo").unwrap().unwrap().version);
     }
 
-    #[tokio::test]
-    async fn memory_update_label_twice_from_same_label_object_fails() {
+    #[test]
+    fn memory_update_label_twice_from_same_label_object_fails() {
         let store = MemoryLabelStore::new();
-        let foo = store.create_label("foo").await.unwrap();
+        let foo = store.create_label("foo").unwrap();
 
         assert!(store
             .set_label(&foo, [6, 7, 8, 9, 10])
-            .await
+            
             .unwrap()
             .is_some());
         assert!(store
             .set_label(&foo, [1, 1, 1, 1, 1])
-            .await
+            
             .unwrap()
             .is_none());
     }
 
-    #[tokio::test]
-    async fn memory_update_label_twice_from_updated_label_object_succeeds() {
+    #[test]
+    fn memory_update_label_twice_from_updated_label_object_succeeds() {
         let store = MemoryLabelStore::new();
-        let foo = store.create_label("foo").await.unwrap();
+        let foo = store.create_label("foo").unwrap();
 
         let foo2 = store
             .set_label(&foo, [6, 7, 8, 9, 10])
-            .await
+            
             .unwrap()
             .unwrap();
         assert!(store
             .set_label(&foo2, [1, 1, 1, 1, 1])
-            .await
+            
             .unwrap()
             .is_some());
     }
 
-    #[tokio::test]
-    async fn create_and_delete_label() {
+    #[test]
+    fn create_and_delete_label() {
         let store = MemoryLabelStore::new();
 
-        store.create_label("foo").await.unwrap();
-        assert!(store.get_label("foo").await.unwrap().is_some());
-        assert!(store.delete_label("foo").await.unwrap());
-        assert!(store.get_label("foo").await.unwrap().is_none());
+        store.create_label("foo").unwrap();
+        assert!(store.get_label("foo").unwrap().is_some());
+        assert!(store.delete_label("foo").unwrap());
+        assert!(store.get_label("foo").unwrap().is_none());
     }
 
-    #[tokio::test]
-    async fn delete_nonexistent_label() {
+    #[test]
+    fn delete_nonexistent_label() {
         let store = MemoryLabelStore::new();
 
-        assert!(!store.delete_label("foo").await.unwrap());
+        assert!(!store.delete_label("foo").unwrap());
     }
 }

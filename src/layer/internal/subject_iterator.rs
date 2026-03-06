@@ -1,7 +1,7 @@
 use crate::layer::*;
 use std::cmp::Ordering;
 use std::convert::TryInto;
-use tdb_succinct::*;
+use tdb_succinct_wasm::*;
 use thiserror::Error;
 
 #[derive(Clone)]
@@ -457,13 +457,13 @@ mod tests {
     use crate::layer::base::base_tests::*;
     use crate::layer::child::child_tests::*;
     use crate::layer::*;
-    use tdb_succinct::TdbDataType;
+    use tdb_succinct_wasm::TdbDataType;
 
     use std::sync::Arc;
 
-    #[tokio::test]
-    async fn base_triple_iterator() {
-        let base_layer: InternalLayer = example_base_layer().await.into();
+    #[test]
+    fn base_triple_iterator() {
+        let base_layer: InternalLayer = example_base_layer().into();
 
         let triples: Vec<_> = base_layer.internal_triple_additions().collect();
         let expected = vec![
@@ -479,19 +479,19 @@ mod tests {
         assert_eq!(expected, triples);
     }
 
-    #[tokio::test]
-    async fn base_triple_removal_iterator() {
-        let base_layer: InternalLayer = example_base_layer().await.into();
+    #[test]
+    fn base_triple_removal_iterator() {
+        let base_layer: InternalLayer = example_base_layer().into();
 
         let triples: Vec<_> = base_layer.internal_triple_removals().collect();
         assert!(triples.is_empty());
     }
 
-    #[tokio::test]
-    async fn base_stubs_triple_iterator() {
+    #[test]
+    fn base_stubs_triple_iterator() {
         let files = base_layer_files();
 
-        let mut builder = BaseLayerFileBuilder::from_files(&files).await.unwrap();
+        let mut builder = BaseLayerFileBuilder::from_files(&files).unwrap();
 
         let nodes = vec!["aaaaa", "baa", "bbbbb", "ccccc", "mooo"];
         let predicates = vec!["abcde", "fghij", "klmno", "lll"];
@@ -500,14 +500,14 @@ mod tests {
         builder.add_nodes(nodes.into_iter().map(|s| s.to_string()));
         builder.add_predicates(predicates.into_iter().map(|s| s.to_string()));
         builder.add_values(values.into_iter().map(|s| String::make_entry(&s)));
-        let mut builder = builder.into_phase2().await.unwrap();
-        builder.add_triple(1, 1, 1).await.unwrap();
-        builder.add_triple(3, 2, 5).await.unwrap();
-        builder.add_triple(5, 3, 6).await.unwrap();
-        builder.finalize().await.unwrap();
+        let mut builder = builder.into_phase2().unwrap();
+        builder.add_triple(1, 1, 1).unwrap();
+        builder.add_triple(3, 2, 5).unwrap();
+        builder.add_triple(5, 3, 6).unwrap();
+        builder.finalize().unwrap();
 
         let layer = BaseLayer::load_from_files([1, 2, 3, 4, 5], &files)
-            .await
+            
             .unwrap();
 
         let triples: Vec<_> = layer.internal_triple_additions().collect();
@@ -521,10 +521,10 @@ mod tests {
         assert_eq!(expected, triples);
     }
 
-    async fn layer_for_seek_tests() -> InternalLayer {
+    fn layer_for_seek_tests() -> InternalLayer {
         let files = base_layer_files();
 
-        let mut builder = BaseLayerFileBuilder::from_files(&files).await.unwrap();
+        let mut builder = BaseLayerFileBuilder::from_files(&files).unwrap();
 
         let nodes = vec!["aaaaa", "baa", "bbbbb", "ccccc", "mooo"];
         let predicates = vec!["abcde", "fghij", "klmno", "lll"];
@@ -533,21 +533,21 @@ mod tests {
         builder.add_nodes(nodes.into_iter().map(|s| s.to_string()));
         builder.add_predicates(predicates.into_iter().map(|s| s.to_string()));
         builder.add_values(values.into_iter().map(|s| String::make_entry(&s)));
-        let mut builder = builder.into_phase2().await.unwrap();
-        builder.add_triple(1, 1, 1).await.unwrap();
-        builder.add_triple(3, 2, 5).await.unwrap();
-        builder.add_triple(3, 3, 5).await.unwrap();
-        builder.add_triple(5, 3, 6).await.unwrap();
-        builder.finalize().await.unwrap();
+        let mut builder = builder.into_phase2().unwrap();
+        builder.add_triple(1, 1, 1).unwrap();
+        builder.add_triple(3, 2, 5).unwrap();
+        builder.add_triple(3, 3, 5).unwrap();
+        builder.add_triple(5, 3, 6).unwrap();
+        builder.finalize().unwrap();
 
         BaseLayer::load_from_files([1, 2, 3, 4, 5], &files)
-            .await
+            
             .unwrap()
     }
 
-    #[tokio::test]
-    async fn base_triple_iterator_seek_to_subject() {
-        let layer = layer_for_seek_tests().await;
+    #[test]
+    fn base_triple_iterator_seek_to_subject() {
+        let layer = layer_for_seek_tests();
 
         let triples: Vec<_> = layer.internal_triple_additions().seek_subject(3).collect();
 
@@ -560,9 +560,9 @@ mod tests {
         assert_eq!(expected, triples);
     }
 
-    #[tokio::test]
-    async fn base_triple_iterator_seek_to_subject_nonexistent() {
-        let layer = layer_for_seek_tests().await;
+    #[test]
+    fn base_triple_iterator_seek_to_subject_nonexistent() {
+        let layer = layer_for_seek_tests();
 
         let triples: Vec<_> = layer.internal_triple_additions().seek_subject(4).collect();
 
@@ -571,18 +571,18 @@ mod tests {
         assert_eq!(expected, triples);
     }
 
-    #[tokio::test]
-    async fn base_triple_iterator_seek_to_subject_past_end() {
-        let layer = layer_for_seek_tests().await;
+    #[test]
+    fn base_triple_iterator_seek_to_subject_past_end() {
+        let layer = layer_for_seek_tests();
 
         let triples: Vec<_> = layer.internal_triple_additions().seek_subject(7).collect();
 
         assert!(triples.is_empty());
     }
 
-    #[tokio::test]
-    async fn base_triple_iterator_seek_to_subject_0() {
-        let layer = layer_for_seek_tests().await;
+    #[test]
+    fn base_triple_iterator_seek_to_subject_0() {
+        let layer = layer_for_seek_tests();
 
         let triples: Vec<_> = layer.internal_triple_additions().seek_subject(0).collect();
 
@@ -596,11 +596,11 @@ mod tests {
         assert_eq!(expected, triples);
     }
 
-    #[tokio::test]
-    async fn base_triple_iterator_seek_to_subject_before_begin() {
+    #[test]
+    fn base_triple_iterator_seek_to_subject_before_begin() {
         let files = base_layer_files();
 
-        let mut builder = BaseLayerFileBuilder::from_files(&files).await.unwrap();
+        let mut builder = BaseLayerFileBuilder::from_files(&files).unwrap();
 
         let nodes = vec!["aaaaa", "baa", "bbbbb", "ccccc", "mooo"];
         let predicates = vec!["abcde", "fghij", "klmno", "lll"];
@@ -609,14 +609,14 @@ mod tests {
         builder.add_nodes(nodes.into_iter().map(|s| s.to_string()));
         builder.add_predicates(predicates.into_iter().map(|s| s.to_string()));
         builder.add_values(values.into_iter().map(|s| String::make_entry(&s)));
-        let mut builder = builder.into_phase2().await.unwrap();
-        builder.add_triple(3, 2, 5).await.unwrap();
-        builder.add_triple(3, 3, 5).await.unwrap();
-        builder.add_triple(5, 3, 6).await.unwrap();
-        builder.finalize().await.unwrap();
+        let mut builder = builder.into_phase2().unwrap();
+        builder.add_triple(3, 2, 5).unwrap();
+        builder.add_triple(3, 3, 5).unwrap();
+        builder.add_triple(5, 3, 6).unwrap();
+        builder.finalize().unwrap();
 
         let layer = BaseLayer::load_from_files([1, 2, 3, 4, 5], &files)
-            .await
+            
             .unwrap();
 
         let triples: Vec<_> = layer.internal_triple_additions().seek_subject(2).collect();
@@ -630,10 +630,10 @@ mod tests {
         assert_eq!(expected, triples);
     }
 
-    async fn layer_for_seek_sp_tests() -> InternalLayer {
+    fn layer_for_seek_sp_tests() -> InternalLayer {
         let files = base_layer_files();
 
-        let mut builder = BaseLayerFileBuilder::from_files(&files).await.unwrap();
+        let mut builder = BaseLayerFileBuilder::from_files(&files).unwrap();
 
         let nodes = vec!["aaaaa", "baa", "bbbbb", "ccccc", "mooo"];
         let predicates = vec!["abcde", "fghij", "klmno", "lll", "xyz", "yyy"];
@@ -642,24 +642,24 @@ mod tests {
         builder.add_nodes(nodes.into_iter().map(|s| s.to_string()));
         builder.add_predicates(predicates.into_iter().map(|s| s.to_string()));
         builder.add_values(values.into_iter().map(|s| String::make_entry(&s)));
-        let mut builder = builder.into_phase2().await.unwrap();
-        builder.add_triple(1, 1, 1).await.unwrap();
-        builder.add_triple(3, 2, 4).await.unwrap();
-        builder.add_triple(3, 2, 5).await.unwrap();
-        builder.add_triple(3, 4, 2).await.unwrap();
-        builder.add_triple(3, 4, 3).await.unwrap();
-        builder.add_triple(3, 4, 5).await.unwrap();
-        builder.add_triple(5, 3, 6).await.unwrap();
-        builder.finalize().await.unwrap();
+        let mut builder = builder.into_phase2().unwrap();
+        builder.add_triple(1, 1, 1).unwrap();
+        builder.add_triple(3, 2, 4).unwrap();
+        builder.add_triple(3, 2, 5).unwrap();
+        builder.add_triple(3, 4, 2).unwrap();
+        builder.add_triple(3, 4, 3).unwrap();
+        builder.add_triple(3, 4, 5).unwrap();
+        builder.add_triple(5, 3, 6).unwrap();
+        builder.finalize().unwrap();
 
         BaseLayer::load_from_files([1, 2, 3, 4, 5], &files)
-            .await
+            
             .unwrap()
     }
 
-    #[tokio::test]
-    async fn base_triple_iterator_seek_to_subject_predicate() {
-        let layer = layer_for_seek_sp_tests().await;
+    #[test]
+    fn base_triple_iterator_seek_to_subject_predicate() {
+        let layer = layer_for_seek_sp_tests();
 
         let triples: Vec<_> = layer
             .internal_triple_additions()
@@ -676,9 +676,9 @@ mod tests {
         assert_eq!(expected, triples);
     }
 
-    #[tokio::test]
-    async fn base_triple_iterator_seek_to_subject_predicate_nonexistent() {
-        let layer = layer_for_seek_sp_tests().await;
+    #[test]
+    fn base_triple_iterator_seek_to_subject_predicate_nonexistent() {
+        let layer = layer_for_seek_sp_tests();
 
         let triples: Vec<_> = layer
             .internal_triple_additions()
@@ -695,9 +695,9 @@ mod tests {
         assert_eq!(expected, triples);
     }
 
-    #[tokio::test]
-    async fn base_triple_iterator_seek_to_subject_predicate_pred0() {
-        let layer = layer_for_seek_sp_tests().await;
+    #[test]
+    fn base_triple_iterator_seek_to_subject_predicate_pred0() {
+        let layer = layer_for_seek_sp_tests();
 
         let triples: Vec<_> = layer
             .internal_triple_additions()
@@ -716,9 +716,9 @@ mod tests {
         assert_eq!(expected, triples);
     }
 
-    #[tokio::test]
-    async fn base_triple_iterator_seek_to_subject_predicate_sub0() {
-        let layer = layer_for_seek_sp_tests().await;
+    #[test]
+    fn base_triple_iterator_seek_to_subject_predicate_sub0() {
+        let layer = layer_for_seek_sp_tests();
 
         let triples: Vec<_> = layer
             .internal_triple_additions()
@@ -738,9 +738,9 @@ mod tests {
         assert_eq!(expected, triples);
     }
 
-    #[tokio::test]
-    async fn base_triple_iterator_seek_to_subject_predicate_pred_before() {
-        let layer = layer_for_seek_sp_tests().await;
+    #[test]
+    fn base_triple_iterator_seek_to_subject_predicate_pred_before() {
+        let layer = layer_for_seek_sp_tests();
 
         let triples: Vec<_> = layer
             .internal_triple_additions()
@@ -759,9 +759,9 @@ mod tests {
         assert_eq!(expected, triples);
     }
 
-    #[tokio::test]
-    async fn base_triple_iterator_seek_to_subject_predicate_pred_past_end_of_subject() {
-        let layer = layer_for_seek_sp_tests().await;
+    #[test]
+    fn base_triple_iterator_seek_to_subject_predicate_pred_past_end_of_subject() {
+        let layer = layer_for_seek_sp_tests();
 
         let triples: Vec<_> = layer
             .internal_triple_additions()
@@ -773,9 +773,9 @@ mod tests {
         assert_eq!(expected, triples);
     }
 
-    #[tokio::test]
-    async fn base_triple_iterator_seek_to_subject_predicate_pred_past_end() {
-        let layer = layer_for_seek_sp_tests().await;
+    #[test]
+    fn base_triple_iterator_seek_to_subject_predicate_pred_past_end() {
+        let layer = layer_for_seek_sp_tests();
 
         let triples: Vec<_> = layer
             .internal_triple_additions()
@@ -785,9 +785,9 @@ mod tests {
         assert!(triples.is_empty());
     }
 
-    #[tokio::test]
-    async fn base_triple_iterator_additions_for_subject() {
-        let layer = layer_for_seek_tests().await;
+    #[test]
+    fn base_triple_iterator_additions_for_subject() {
+        let layer = layer_for_seek_tests();
 
         let triples: Vec<_> = layer.internal_triple_additions_s(3).collect();
 
@@ -796,9 +796,9 @@ mod tests {
         assert_eq!(expected, triples);
     }
 
-    #[tokio::test]
-    async fn base_triple_iterator_additions_for_subject_predicate() {
-        let layer = layer_for_seek_sp_tests().await;
+    #[test]
+    fn base_triple_iterator_additions_for_subject_predicate() {
+        let layer = layer_for_seek_sp_tests();
 
         let expected = vec![
             IdTriple::new(3, 4, 2),
@@ -811,33 +811,33 @@ mod tests {
         assert_eq!(expected, triples);
     }
 
-    async fn child_layer() -> InternalLayer {
-        let base_layer = example_base_layer().await;
+    fn child_layer() -> InternalLayer {
+        let base_layer = example_base_layer();
         let parent: Arc<InternalLayer> = Arc::new(base_layer.into());
 
         let child_files = child_layer_files();
 
         let child_builder = ChildLayerFileBuilder::from_files(parent.clone(), &child_files)
-            .await
+            
             .unwrap();
-        let mut builder = child_builder.into_phase2().await.unwrap();
-        builder.add_triple(1, 2, 3).await.unwrap();
-        builder.add_triple(3, 3, 4).await.unwrap();
-        builder.add_triple(3, 5, 6).await.unwrap();
-        builder.remove_triple(1, 1, 1).await.unwrap();
-        builder.remove_triple(2, 1, 3).await.unwrap();
-        builder.remove_triple(4, 3, 6).await.unwrap();
-        builder.finalize().await.unwrap();
+        let mut builder = child_builder.into_phase2().unwrap();
+        builder.add_triple(1, 2, 3).unwrap();
+        builder.add_triple(3, 3, 4).unwrap();
+        builder.add_triple(3, 5, 6).unwrap();
+        builder.remove_triple(1, 1, 1).unwrap();
+        builder.remove_triple(2, 1, 3).unwrap();
+        builder.remove_triple(4, 3, 6).unwrap();
+        builder.finalize().unwrap();
 
         ChildLayer::load_from_files([5, 4, 3, 2, 1], parent, &child_files)
-            .await
+            
             .unwrap()
             .into()
     }
 
-    #[tokio::test]
-    async fn child_triple_addition_iterator() {
-        let layer = child_layer().await;
+    #[test]
+    fn child_triple_addition_iterator() {
+        let layer = child_layer();
 
         let triples: Vec<_> = layer.internal_triple_additions().collect();
 
@@ -850,9 +850,9 @@ mod tests {
         assert_eq!(expected, triples);
     }
 
-    #[tokio::test]
-    async fn child_triple_removal_iterator() {
-        let layer = child_layer().await;
+    #[test]
+    fn child_triple_removal_iterator() {
+        let layer = child_layer();
 
         let triples: Vec<_> = layer.internal_triple_removals().collect();
 
@@ -867,47 +867,47 @@ mod tests {
 
     use crate::storage::memory::*;
     use crate::storage::LayerStore;
-    #[tokio::test]
-    async fn combined_iterator_for_subject() {
+    #[test]
+    fn combined_iterator_for_subject() {
         let store = MemoryLayerStore::new();
-        let mut builder = store.create_base_layer().await.unwrap();
+        let mut builder = store.create_base_layer().unwrap();
         let base_name = builder.name();
 
         builder.add_value_triple(ValueTriple::new_string_value("cow", "says", "moo"));
         builder.add_value_triple(ValueTriple::new_string_value("duck", "says", "quack"));
         builder.add_value_triple(ValueTriple::new_node("cow", "likes", "duck"));
         builder.add_value_triple(ValueTriple::new_node("duck", "hates", "cow"));
-        builder.commit_boxed().await.unwrap();
+        builder.commit_boxed().unwrap();
 
-        builder = store.create_child_layer(base_name).await.unwrap();
+        builder = store.create_child_layer(base_name).unwrap();
         let child1_name = builder.name();
 
         builder.add_value_triple(ValueTriple::new_string_value("horse", "says", "neigh"));
         builder.add_value_triple(ValueTriple::new_node("horse", "likes", "horse"));
-        builder.commit_boxed().await.unwrap();
+        builder.commit_boxed().unwrap();
 
-        builder = store.create_child_layer(child1_name).await.unwrap();
+        builder = store.create_child_layer(child1_name).unwrap();
         let child2_name = builder.name();
 
         builder.remove_value_triple(ValueTriple::new_node("duck", "hates", "cow"));
         builder.add_value_triple(ValueTriple::new_node("duck", "likes", "cow"));
-        builder.commit_boxed().await.unwrap();
+        builder.commit_boxed().unwrap();
 
-        builder = store.create_child_layer(child2_name).await.unwrap();
+        builder = store.create_child_layer(child2_name).unwrap();
         let child3_name = builder.name();
 
         builder.remove_value_triple(ValueTriple::new_node("duck", "likes", "cow"));
         builder.add_value_triple(ValueTriple::new_node("duck", "hates", "cow"));
-        builder.commit_boxed().await.unwrap();
+        builder.commit_boxed().unwrap();
 
-        builder = store.create_child_layer(child3_name).await.unwrap();
+        builder = store.create_child_layer(child3_name).unwrap();
         let child4_name = builder.name();
 
         builder.remove_value_triple(ValueTriple::new_node("duck", "hates", "cow"));
         builder.add_value_triple(ValueTriple::new_node("duck", "likes", "cow"));
-        builder.commit_boxed().await.unwrap();
+        builder.commit_boxed().unwrap();
 
-        let layer = store.get_layer(child4_name).await.unwrap().unwrap();
+        let layer = store.get_layer(child4_name).unwrap().unwrap();
 
         let subject_id = layer.subject_id("duck").unwrap();
         let triples: Vec<_> = layer
@@ -923,51 +923,51 @@ mod tests {
         assert_eq!(expected, triples);
     }
 
-    #[tokio::test]
-    async fn combined_iterator_for_subject_predicate() {
+    #[test]
+    fn combined_iterator_for_subject_predicate() {
         let store = MemoryLayerStore::new();
-        let mut builder = store.create_base_layer().await.unwrap();
+        let mut builder = store.create_base_layer().unwrap();
         let base_name = builder.name();
 
         builder.add_value_triple(ValueTriple::new_string_value("cow", "says", "moo"));
         builder.add_value_triple(ValueTriple::new_string_value("duck", "says", "quack"));
         builder.add_value_triple(ValueTriple::new_node("cow", "likes", "duck"));
         builder.add_value_triple(ValueTriple::new_node("duck", "hates", "cow"));
-        builder.commit_boxed().await.unwrap();
+        builder.commit_boxed().unwrap();
 
-        builder = store.create_child_layer(base_name).await.unwrap();
+        builder = store.create_child_layer(base_name).unwrap();
         let child1_name = builder.name();
 
         builder.add_value_triple(ValueTriple::new_string_value("horse", "says", "neigh"));
         builder.add_value_triple(ValueTriple::new_node("horse", "likes", "horse"));
-        builder.commit_boxed().await.unwrap();
+        builder.commit_boxed().unwrap();
 
-        builder = store.create_child_layer(child1_name).await.unwrap();
+        builder = store.create_child_layer(child1_name).unwrap();
         let child2_name = builder.name();
 
         builder.remove_value_triple(ValueTriple::new_node("duck", "hates", "cow"));
         builder.add_value_triple(ValueTriple::new_node("duck", "likes", "cow"));
         builder.add_value_triple(ValueTriple::new_node("duck", "likes", "horse"));
-        builder.commit_boxed().await.unwrap();
+        builder.commit_boxed().unwrap();
 
-        builder = store.create_child_layer(child2_name).await.unwrap();
+        builder = store.create_child_layer(child2_name).unwrap();
         let child3_name = builder.name();
 
         builder.remove_value_triple(ValueTriple::new_node("duck", "likes", "cow"));
         builder.add_value_triple(ValueTriple::new_node("duck", "hates", "cow"));
         builder.add_value_triple(ValueTriple::new_node("duck", "likes", "pig"));
-        builder.commit_boxed().await.unwrap();
+        builder.commit_boxed().unwrap();
 
-        builder = store.create_child_layer(child3_name).await.unwrap();
+        builder = store.create_child_layer(child3_name).unwrap();
         let child4_name = builder.name();
 
         builder.remove_value_triple(ValueTriple::new_node("duck", "hates", "cow"));
         builder.remove_value_triple(ValueTriple::new_node("duck", "likes", "horse"));
         builder.add_value_triple(ValueTriple::new_node("duck", "likes", "cow"));
         builder.add_value_triple(ValueTriple::new_node("duck", "likes", "rabbit"));
-        builder.commit_boxed().await.unwrap();
+        builder.commit_boxed().unwrap();
 
-        let layer = store.get_layer(child4_name).await.unwrap().unwrap();
+        let layer = store.get_layer(child4_name).unwrap().unwrap();
 
         let subject_id = layer.subject_id("duck").unwrap();
         let predicate_id = layer.predicate_id("likes").unwrap();
@@ -985,9 +985,9 @@ mod tests {
         assert_eq!(expected, triples);
     }
 
-    async fn create_stack_for_partial_tests() -> ([u32; 5], Arc<InternalLayer>) {
+    fn create_stack_for_partial_tests() -> ([u32; 5], Arc<InternalLayer>) {
         let store = MemoryLayerStore::new();
-        let mut builder = store.create_base_layer().await.unwrap();
+        let mut builder = store.create_base_layer().unwrap();
         let base_name = builder.name();
 
         builder.add_value_triple(ValueTriple::new_string_value("cow", "says", "moo"));
@@ -995,16 +995,16 @@ mod tests {
         builder.add_value_triple(ValueTriple::new_string_value("duck", "says", "quack"));
         builder.add_value_triple(ValueTriple::new_node("cow", "likes", "duck"));
         builder.add_value_triple(ValueTriple::new_node("duck", "hates", "cow"));
-        builder.commit_boxed().await.unwrap();
+        builder.commit_boxed().unwrap();
 
-        builder = store.create_child_layer(base_name).await.unwrap();
+        builder = store.create_child_layer(base_name).unwrap();
         let child1_name = builder.name();
 
         builder.add_value_triple(ValueTriple::new_string_value("horse", "says", "woof"));
         builder.add_value_triple(ValueTriple::new_node("horse", "likes", "horse"));
-        builder.commit_boxed().await.unwrap();
+        builder.commit_boxed().unwrap();
 
-        builder = store.create_child_layer(child1_name).await.unwrap();
+        builder = store.create_child_layer(child1_name).unwrap();
         let child2_name = builder.name();
 
         builder.remove_value_triple(ValueTriple::new_string_value("horse", "says", "woof"));
@@ -1012,9 +1012,9 @@ mod tests {
 
         builder.add_value_triple(ValueTriple::new_string_value("horse", "says", "quack"));
         builder.add_value_triple(ValueTriple::new_string_value("rabbit", "says", "sniff"));
-        builder.commit_boxed().await.unwrap();
+        builder.commit_boxed().unwrap();
 
-        builder = store.create_child_layer(child2_name).await.unwrap();
+        builder = store.create_child_layer(child2_name).unwrap();
         let child3_name = builder.name();
 
         builder.remove_value_triple(ValueTriple::new_node("duck", "hates", "cow"));
@@ -1022,17 +1022,17 @@ mod tests {
 
         builder.add_value_triple(ValueTriple::new_node("duck", "likes", "cow"));
         builder.add_value_triple(ValueTriple::new_string_value("horse", "says", "neigh"));
-        builder.commit_boxed().await.unwrap();
+        builder.commit_boxed().unwrap();
 
         (
             child1_name,
-            store.get_layer(child3_name).await.unwrap().unwrap(),
+            store.get_layer(child3_name).unwrap().unwrap(),
         )
     }
 
-    #[tokio::test]
-    async fn iterate_partial_stack() {
-        let (parent_id, layer) = create_stack_for_partial_tests().await;
+    #[test]
+    fn iterate_partial_stack() {
+        let (parent_id, layer) = create_stack_for_partial_tests();
 
         let iterator = InternalTripleStackIterator::from_layer_stack(&*layer, parent_id).unwrap();
         let changes: Vec<_> = iterator

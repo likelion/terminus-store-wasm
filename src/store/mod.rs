@@ -7,16 +7,17 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock};
 
 use crate::layer::{IdTriple, Layer, LayerBuilder, LayerCounts, ObjectType, ValueTriple};
-use crate::storage::archive::{ArchiveLayerStore, DirectoryArchiveBackend, LruArchiveBackend};
+// Archive store temporarily disabled during async stripping
+// use crate::storage::archive::{ArchiveLayerStore, DirectoryArchiveBackend, LruArchiveBackend};
 use crate::storage::directory::{DirectoryLabelStore, DirectoryLayerStore};
 use crate::storage::memory::{MemoryLabelStore, MemoryLayerStore};
+use crate::storage::persistence::{LabelPersistence, LayerPersistence};
+use crate::storage::persistence_store::{PersistenceLabelStore, PersistenceLayerStore};
 use crate::storage::{CachedLayerStore, LabelStore, LayerStore, LockingHashMapLayerCache};
-use tdb_succinct::TypedDictEntry;
+use tdb_succinct_wasm::TypedDictEntry;
 
 use std::io;
 
-use async_trait::async_trait;
-use rayon::prelude::*;
 
 /// A store, storing a set of layers and database labels pointing to these layers.
 #[derive(Clone)]
@@ -43,8 +44,8 @@ pub struct StoreLayerBuilder {
 }
 
 impl StoreLayerBuilder {
-    async fn new(store: Store) -> io::Result<Self> {
-        let builder = store.layer_store.create_base_layer().await?;
+    fn new(store: Store) -> io::Result<Self> {
+        let builder = store.layer_store.create_base_layer()?;
 
         Ok(Self {
             parent: builder.parent(),
@@ -121,7 +122,7 @@ impl StoreLayerBuilder {
     }
 
     /// Commit the layer to storage without loading the resulting layer.
-    pub async fn commit_no_load(&self) -> io::Result<()> {
+    pub fn commit_no_load(&self) -> io::Result<()> {
         let mut builder = None;
         {
             let mut guard = self
@@ -142,18 +143,18 @@ impl StoreLayerBuilder {
             }
             Some(builder) => {
                 let id = builder.name();
-                builder.commit_boxed().await?;
-                self.store.layer_store.finalize_layer(id).await
+                builder.commit_boxed()?;
+                self.store.layer_store.finalize_layer(id)
             }
         }
     }
 
     /// Commit the layer to storage.
-    pub async fn commit(&self) -> io::Result<StoreLayer> {
+    pub fn commit(&self) -> io::Result<StoreLayer> {
         let name = self.name;
-        self.commit_no_load().await?;
+        self.commit_no_load()?;
 
-        let layer = self.store.layer_store.get_layer(name).await?;
+        let layer = self.store.layer_store.get_layer(name)?;
         Ok(StoreLayer::wrap(
             layer.expect("layer that was just created was not found in store"),
             self.store.clone(),
@@ -164,27 +165,21 @@ impl StoreLayerBuilder {
     ///
     /// This is a way to 'cherry-pick' a layer on top of another
     /// layer, without caring about its history.
-    pub async fn apply_delta(&self, delta: &StoreLayer) -> Result<(), io::Error> {
+    pub fn apply_delta(&self, delta: &StoreLayer) -> Result<(), io::Error> {
         // create a child builder and use it directly
         // first check what dictionary entries we don't know about, add those
-        let triple_additions = delta.triple_additions().await?;
-        let triple_removals = delta.triple_removals().await?;
-        rayon::join(
-            move || {
-                triple_additions.par_bridge().for_each(|t| {
-                    delta
-                        .id_triple_to_string(&t)
-                        .map(|st| self.add_value_triple(st));
-                });
-            },
-            move || {
-                triple_removals.par_bridge().for_each(|t| {
-                    delta
-                        .id_triple_to_string(&t)
-                        .map(|st| self.remove_value_triple(st));
-                })
-            },
-        );
+        let triple_additions = delta.triple_additions()?;
+        let triple_removals = delta.triple_removals()?;
+        triple_additions.for_each(|t| {
+            delta
+                .id_triple_to_string(&t)
+                .map(|st| self.add_value_triple(st));
+        });
+        triple_removals.for_each(|t| {
+            delta
+                .id_triple_to_string(&t)
+                .map(|st| self.remove_value_triple(st));
+        });
 
         Ok(())
     }
@@ -193,79 +188,75 @@ impl StoreLayerBuilder {
     pub fn apply_diff(&self, other: &StoreLayer) -> Result<(), io::Error> {
         // create a child builder and use it directly
         // first check what dictionary entries we don't know about, add those
-        rayon::join(
-            || {
-                if let Some(this) = self.parent() {
-                    this.triples().par_bridge().for_each(|t| {
-                        if let Some(st) = this.id_triple_to_string(&t) {
-                            if !other.value_triple_exists(&st) {
-                                self.remove_value_triple(st).unwrap()
-                            }
-                        }
-                    })
-                };
-            },
-            || {
-                other.triples().par_bridge().for_each(|t| {
-                    if let Some(st) = other.id_triple_to_string(&t) {
-                        if let Some(this) = self.parent() {
-                            if !this.value_triple_exists(&st) {
-                                self.add_value_triple(st).unwrap()
-                            }
-                        } else {
-                            self.add_value_triple(st).unwrap()
-                        };
+        if let Some(this) = self.parent() {
+            this.triples().for_each(|t| {
+                if let Some(st) = this.id_triple_to_string(&t) {
+                    if !other.value_triple_exists(&st) {
+                        self.remove_value_triple(st).unwrap()
                     }
-                })
-            },
-        );
+                }
+            });
+        }
+        other.triples().for_each(|t| {
+            if let Some(st) = other.id_triple_to_string(&t) {
+                if let Some(this) = self.parent() {
+                    if !this.value_triple_exists(&st) {
+                        self.add_value_triple(st).unwrap()
+                    }
+                } else {
+                    self.add_value_triple(st).unwrap()
+                };
+            }
+        });
 
         Ok(())
     }
 
     // Apply changes required to change our parent layer into after merge.
     // This is a three-way merge with other layers relative to the merge base if given.
+    // Requires at least two layers in `others` to perform a meaningful merge.
     pub fn apply_merge(
         &self,
         others: Vec<&StoreLayer>,
         merge_base: Option<&StoreLayer>,
     ) -> Result<(), io::Error> {
-        rayon::join(
-            || match merge_base {
-                Some(base) => {
-                    base.triples().par_bridge().for_each(|b| {
-                        if let Some(t) = base.id_triple_to_string(&b) {
-                            if others
-                                .iter()
-                                .par_bridge()
-                                .any(|o| !o.value_triple_exists(&t))
-                            {
-                                self.remove_value_triple(t).unwrap();
+        if others.len() < 2 {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "merge requires at least two layers",
+            ));
+        }
+        match merge_base {
+            Some(base) => {
+                base.triples().for_each(|b| {
+                    if let Some(t) = base.id_triple_to_string(&b) {
+                        if others
+                            .iter()
+                            .any(|o| !o.value_triple_exists(&t))
+                        {
+                            self.remove_value_triple(t).unwrap();
+                        }
+                    }
+                });
+            }
+            None => {}
+        }
+        others.iter().for_each(|os| {
+            os.triples().for_each(|o| {
+                if let Some(t) = os.id_triple_to_string(&o) {
+                    match merge_base {
+                        Some(base) => {
+                            if !base.value_triple_exists(&t) {
+                                self.add_value_triple(t).unwrap();
                             }
                         }
-                    });
+                        None => {
+                            self.add_value_triple(t).unwrap();
+                        }
+                    }
                 }
-                None => {}
-            },
-            || {
-                others.iter().par_bridge().for_each(|os| {
-                    os.triples().par_bridge().for_each(|o| {
-                        if let Some(t) = os.id_triple_to_string(&o) {
-                            match merge_base {
-                                Some(base) => {
-                                    if !base.value_triple_exists(&t) {
-                                        self.add_value_triple(t).unwrap();
-                                    }
-                                }
-                                None => {
-                                    self.add_value_triple(t).unwrap();
-                                }
-                            }
-                        }
-                    })
-                })
-            },
-        );
+            })
+        });
         Ok(())
     }
 }
@@ -294,23 +285,23 @@ impl StoreLayer {
     }
 
     /// Create a layer builder based on this layer.
-    pub async fn open_write(&self) -> io::Result<StoreLayerBuilder> {
+    pub fn open_write(&self) -> io::Result<StoreLayerBuilder> {
         let layer = self
             .store
             .layer_store
             .create_child_layer(self.layer.name())
-            .await?;
+            ?;
 
         Ok(StoreLayerBuilder::wrap(layer, self.store.clone()))
     }
 
     /// Returns the parent of this layer, if any, or None if this layer has no parent.
-    pub async fn parent(&self) -> io::Result<Option<StoreLayer>> {
+    pub fn parent(&self) -> io::Result<Option<StoreLayer>> {
         let parent_name = self.layer.parent_name();
 
         match parent_name {
             None => Ok(None),
-            Some(parent_name) => match self.store.layer_store.get_layer(parent_name).await? {
+            Some(parent_name) => match self.store.layer_store.get_layer(parent_name)? {
                 None => Err(io::Error::new(
                     io::ErrorKind::NotFound,
                     "parent layer not found even though it should exist",
@@ -320,19 +311,19 @@ impl StoreLayer {
         }
     }
 
-    pub async fn squash_upto(&self, upto: &StoreLayer) -> io::Result<StoreLayer> {
-        let layer_opt = self.store.layer_store.get_layer(self.name()).await?;
+    pub fn squash_upto(&self, upto: &StoreLayer) -> io::Result<StoreLayer> {
+        let layer_opt = self.store.layer_store.get_layer(self.name())?;
         let layer =
             layer_opt.ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "layer not found"))?;
         let name = self
             .store
             .layer_store
             .squash_upto(layer, upto.name())
-            .await?;
+            ?;
         Ok(self
             .store
             .get_layer_from_id(name)
-            .await?
+            ?
             .expect("layer that was just created doesn't exist"))
     }
 
@@ -344,15 +335,15 @@ impl StoreLayer {
     /// accomplishing this. Rollup is another. Squash is the better
     /// option if you do not care for history, as it throws away all
     /// data that you no longer need.
-    pub async fn squash(&self) -> io::Result<StoreLayer> {
-        let layer_opt = self.store.layer_store.get_layer(self.name()).await?;
+    pub fn squash(&self) -> io::Result<StoreLayer> {
+        let layer_opt = self.store.layer_store.get_layer(self.name())?;
         let layer =
             layer_opt.ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "layer not found"))?;
-        let name = self.store.layer_store.squash(layer).await?;
+        let name = self.store.layer_store.squash(layer)?;
         Ok(self
             .store
             .get_layer_from_id(name)
-            .await?
+            ?
             .expect("layer that was just created doesn't exist"))
     }
 
@@ -363,14 +354,14 @@ impl StoreLayer {
     /// are, the longer queries take. Rollup is one approach of
     /// accomplishing this. Squash is another. Rollup is the better
     /// option if you need to retain history.
-    pub async fn rollup(&self) -> io::Result<()> {
+    pub fn rollup(&self) -> io::Result<()> {
         let store1 = self.store.layer_store.clone();
         // TODO: This is awkward, we should have a way to get the internal layer
-        let layer_opt = store1.get_layer(self.name()).await?;
+        let layer_opt = store1.get_layer(self.name())?;
         let layer =
             layer_opt.ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "layer not found"))?;
         let store2 = self.store.layer_store.clone();
-        store2.rollup(layer).await?;
+        store2.rollup(layer)?;
         Ok(())
     }
 
@@ -381,28 +372,28 @@ impl StoreLayer {
     /// are, the longer queries take. Rollup is one approach of
     /// accomplishing this. Squash is another. Rollup is the better
     /// option if you need to retain history.
-    pub async fn rollup_upto(&self, upto: &StoreLayer) -> io::Result<()> {
+    pub fn rollup_upto(&self, upto: &StoreLayer) -> io::Result<()> {
         let store1 = self.store.layer_store.clone();
         // TODO: This is awkward, we should have a way to get the internal layer
-        let layer_opt = store1.get_layer(self.name()).await?;
+        let layer_opt = store1.get_layer(self.name())?;
         let layer =
             layer_opt.ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "label not found"))?;
         let store2 = self.store.layer_store.clone();
-        store2.rollup_upto(layer, upto.name()).await?;
+        store2.rollup_upto(layer, upto.name())?;
         Ok(())
     }
 
     /// Like rollup_upto, rolls up upto the given layer. However, if
     /// this layer is a rollup layer, this will roll up upto that
     /// rollup.
-    pub async fn imprecise_rollup_upto(&self, upto: &StoreLayer) -> io::Result<()> {
+    pub fn imprecise_rollup_upto(&self, upto: &StoreLayer) -> io::Result<()> {
         let store1 = self.store.layer_store.clone();
         // TODO: This is awkward, we should have a way to get the internal layer
-        let layer_opt = store1.get_layer(self.name()).await?;
+        let layer_opt = store1.get_layer(self.name())?;
         let layer =
             layer_opt.ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "label not found"))?;
         let store2 = self.store.layer_store.clone();
-        store2.imprecise_rollup_upto(layer, upto.name()).await?;
+        store2.imprecise_rollup_upto(layer, upto.name())?;
         Ok(())
     }
 
@@ -410,7 +401,7 @@ impl StoreLayer {
     ///
     /// Since this operation will involve io when this layer is a
     /// rollup layer, io errors may occur.
-    pub async fn triple_addition_exists(
+    pub fn triple_addition_exists(
         &self,
         subject: u64,
         predicate: u64,
@@ -419,14 +410,14 @@ impl StoreLayer {
         self.store
             .layer_store
             .triple_addition_exists(self.layer.name(), subject, predicate, object)
-            .await
+            
     }
 
     /// Returns a future that yields true if this triple has been removed in this layer, or false if it doesn't.
     ///
     /// Since this operation will involve io when this layer is a
     /// rollup layer, io errors may occur.
-    pub async fn triple_removal_exists(
+    pub fn triple_removal_exists(
         &self,
         subject: u64,
         predicate: u64,
@@ -435,19 +426,19 @@ impl StoreLayer {
         self.store
             .layer_store
             .triple_removal_exists(self.layer.name(), subject, predicate, object)
-            .await
+            
     }
 
     /// Returns a future that yields an iterator over all layer additions.
     ///
     /// Since this operation will involve io when this layer is a
     /// rollup layer, io errors may occur.
-    pub async fn triple_additions(&self) -> io::Result<Box<dyn Iterator<Item = IdTriple> + Send>> {
+    pub fn triple_additions(&self) -> io::Result<Box<dyn Iterator<Item = IdTriple> + Send>> {
         let result = self
             .store
             .layer_store
             .triple_additions(self.layer.name())
-            .await?;
+            ?;
 
         Ok(Box::new(result) as Box<dyn Iterator<Item = _> + Send>)
     }
@@ -456,12 +447,12 @@ impl StoreLayer {
     ///
     /// Since this operation will involve io when this layer is a
     /// rollup layer, io errors may occur.
-    pub async fn triple_removals(&self) -> io::Result<Box<dyn Iterator<Item = IdTriple> + Send>> {
+    pub fn triple_removals(&self) -> io::Result<Box<dyn Iterator<Item = IdTriple> + Send>> {
         let result = self
             .store
             .layer_store
             .triple_removals(self.layer.name())
-            .await?;
+            ?;
 
         Ok(Box::new(result) as Box<dyn Iterator<Item = _> + Send>)
     }
@@ -470,35 +461,35 @@ impl StoreLayer {
     ///
     /// Since this operation will involve io when this layer is a
     /// rollup layer, io errors may occur.
-    pub async fn triple_additions_s(
+    pub fn triple_additions_s(
         &self,
         subject: u64,
     ) -> io::Result<Box<dyn Iterator<Item = IdTriple> + Send>> {
         self.store
             .layer_store
             .triple_additions_s(self.layer.name(), subject)
-            .await
+            
     }
 
     /// Returns a future that yields an iterator over all layer removals that share a particular subject.
     ///
     /// Since this operation will involve io when this layer is a
     /// rollup layer, io errors may occur.
-    pub async fn triple_removals_s(
+    pub fn triple_removals_s(
         &self,
         subject: u64,
     ) -> io::Result<Box<dyn Iterator<Item = IdTriple> + Send>> {
         self.store
             .layer_store
             .triple_removals_s(self.layer.name(), subject)
-            .await
+            
     }
 
     /// Returns a future that yields an iterator over all layer additions that share a particular subject and predicate.
     ///
     /// Since this operation will involve io when this layer is a
     /// rollup layer, io errors may occur.
-    pub async fn triple_additions_sp(
+    pub fn triple_additions_sp(
         &self,
         subject: u64,
         predicate: u64,
@@ -506,14 +497,14 @@ impl StoreLayer {
         self.store
             .layer_store
             .triple_additions_sp(self.layer.name(), subject, predicate)
-            .await
+            
     }
 
     /// Returns a future that yields an iterator over all layer removals that share a particular subject and predicate.
     ///
     /// Since this operation will involve io when this layer is a
     /// rollup layer, io errors may occur.
-    pub async fn triple_removals_sp(
+    pub fn triple_removals_sp(
         &self,
         subject: u64,
         predicate: u64,
@@ -521,93 +512,93 @@ impl StoreLayer {
         self.store
             .layer_store
             .triple_removals_sp(self.layer.name(), subject, predicate)
-            .await
+            
     }
 
     /// Returns a future that yields an iterator over all layer additions that share a particular predicate.
     ///
     /// Since this operation will involve io when this layer is a
     /// rollup layer, io errors may occur.
-    pub async fn triple_additions_p(
+    pub fn triple_additions_p(
         &self,
         predicate: u64,
     ) -> io::Result<Box<dyn Iterator<Item = IdTriple> + Send>> {
         self.store
             .layer_store
             .triple_additions_p(self.layer.name(), predicate)
-            .await
+            
     }
 
     /// Returns a future that yields an iterator over all layer removals that share a particular predicate.
     ///
     /// Since this operation will involve io when this layer is a
     /// rollup layer, io errors may occur.
-    pub async fn triple_removals_p(
+    pub fn triple_removals_p(
         &self,
         predicate: u64,
     ) -> io::Result<Box<dyn Iterator<Item = IdTriple> + Send>> {
         self.store
             .layer_store
             .triple_removals_p(self.layer.name(), predicate)
-            .await
+            
     }
 
     /// Returns a future that yields an iterator over all layer additions that share a particular object.
     ///
     /// Since this operation will involve io when this layer is a
     /// rollup layer, io errors may occur.
-    pub async fn triple_additions_o(
+    pub fn triple_additions_o(
         &self,
         object: u64,
     ) -> io::Result<Box<dyn Iterator<Item = IdTriple> + Send>> {
         self.store
             .layer_store
             .triple_additions_o(self.layer.name(), object)
-            .await
+            
     }
 
     /// Returns a future that yields an iterator over all layer removals that share a particular object.
     ///
     /// Since this operation will involve io when this layer is a
     /// rollup layer, io errors may occur.
-    pub async fn triple_removals_o(
+    pub fn triple_removals_o(
         &self,
         object: u64,
     ) -> io::Result<Box<dyn Iterator<Item = IdTriple> + Send>> {
         self.store
             .layer_store
             .triple_removals_o(self.layer.name(), object)
-            .await
+            
     }
 
     /// Returns a future that yields the amount of triples that this layer adds.
     ///
     /// Since this operation will involve io when this layer is a
     /// rollup layer, io errors may occur.
-    pub async fn triple_layer_addition_count(&self) -> io::Result<usize> {
+    pub fn triple_layer_addition_count(&self) -> io::Result<usize> {
         self.store
             .layer_store
             .triple_layer_addition_count(self.layer.name())
-            .await
+            
     }
 
     /// Returns a future that yields the amount of triples that this layer removes.
     ///
     /// Since this operation will involve io when this layer is a
     /// rollup layer, io errors may occur.
-    pub async fn triple_layer_removal_count(&self) -> io::Result<usize> {
+    pub fn triple_layer_removal_count(&self) -> io::Result<usize> {
         self.store
             .layer_store
             .triple_layer_removal_count(self.layer.name())
-            .await
+            
     }
 
     /// Returns a future that yields a vector of layer stack names describing the history of this layer, starting from the base layer up to and including the name of this layer itself.
-    pub async fn retrieve_layer_stack_names(&self) -> io::Result<Vec<[u32; 5]>> {
+    pub fn retrieve_layer_stack_names(&self) -> io::Result<Vec<[u32; 5]>> {
         self.store
             .layer_store
             .retrieve_layer_stack_names(self.name())
-            .await
+            
     }
 }
 
@@ -620,7 +611,6 @@ impl PartialEq for StoreLayer {
 
 impl Eq for StoreLayer {}
 
-#[async_trait]
 impl Layer for StoreLayer {
     fn name(&self) -> [u32; 5] {
         self.layer.name()
@@ -743,8 +733,8 @@ impl NamedGraph {
     }
 
     /// Returns the layer this database points at, as well as the label version.
-    pub async fn head_version(&self) -> io::Result<(Option<StoreLayer>, u64)> {
-        let new_label = self.store.label_store.get_label(&self.label).await?;
+    pub fn head_version(&self) -> io::Result<(Option<StoreLayer>, u64)> {
+        let new_label = self.store.label_store.get_label(&self.label)?;
 
         match new_label {
             None => Err(io::Error::new(
@@ -755,7 +745,7 @@ impl NamedGraph {
                 let layer = match new_label.layer {
                     None => None,
                     Some(layer) => {
-                        let layer = self.store.layer_store.get_layer(layer).await?;
+                        let layer = self.store.layer_store.get_layer(layer)?;
                         match layer {
                             None => {
                                 return Err(io::Error::new(
@@ -773,14 +763,14 @@ impl NamedGraph {
     }
 
     /// Returns the layer this database points at.
-    pub async fn head(&self) -> io::Result<Option<StoreLayer>> {
-        Ok(self.head_version().await?.0)
+    pub fn head(&self) -> io::Result<Option<StoreLayer>> {
+        Ok(self.head_version()?.0)
     }
 
     /// Set the database label to the given layer if it is a valid ancestor, returning false otherwise.
-    pub async fn set_head(&self, layer: &StoreLayer) -> io::Result<bool> {
+    pub fn set_head(&self, layer: &StoreLayer) -> io::Result<bool> {
         let layer_name = layer.name();
-        let label = self.store.label_store.get_label(&self.label).await?;
+        let label = self.store.label_store.get_label(&self.label)?;
         if label.is_none() {
             return Err(io::Error::new(io::ErrorKind::NotFound, "label not found"));
         }
@@ -792,7 +782,7 @@ impl NamedGraph {
                 self.store
                     .layer_store
                     .layer_is_ancestor_of(layer_name, retrieved_layer_name)
-                    .await?
+                    ?
             }
         };
 
@@ -801,7 +791,7 @@ impl NamedGraph {
                 .store
                 .label_store
                 .set_label(&label, layer_name)
-                .await?
+                ?
                 .is_some())
         } else {
             Ok(false)
@@ -809,7 +799,7 @@ impl NamedGraph {
     }
 
     /// Set the database label to the given layer, even if it is not a valid ancestor.
-    pub async fn force_set_head(&self, layer: &StoreLayer) -> io::Result<()> {
+    pub fn force_set_head(&self, layer: &StoreLayer) -> io::Result<()> {
         let layer_name = layer.name();
 
         // We are stomping on the label but `set_label` expects us to
@@ -818,7 +808,7 @@ impl NamedGraph {
         // So keep looping until an update was succesful or an error
         // was encountered.
         loop {
-            let label = self.store.label_store.get_label(&self.label).await?;
+            let label = self.store.label_store.get_label(&self.label)?;
             match label {
                 None => return Err(io::Error::new(io::ErrorKind::NotFound, "label not found")),
                 Some(label) => {
@@ -826,7 +816,7 @@ impl NamedGraph {
                         .store
                         .label_store
                         .set_label(&label, layer_name)
-                        .await?
+                        ?
                         .is_some()
                     {
                         return Ok(());
@@ -837,13 +827,13 @@ impl NamedGraph {
     }
 
     /// Set the database label to the given layer, even if it is not a valid ancestor. Also checks given version, and if it doesn't match, the update won't happen and false will be returned.
-    pub async fn force_set_head_version(
+    pub fn force_set_head_version(
         &self,
         layer: &StoreLayer,
         version: u64,
     ) -> io::Result<bool> {
         let layer_name = layer.name();
-        let label = self.store.label_store.get_label(&self.label).await?;
+        let label = self.store.label_store.get_label(&self.label)?;
         match label {
             None => Err(io::Error::new(io::ErrorKind::NotFound, "label not found")),
             Some(label) => {
@@ -854,15 +844,15 @@ impl NamedGraph {
                         .store
                         .label_store
                         .set_label(&label, layer_name)
-                        .await?
+                        ?
                         .is_some())
                 }
             }
         }
     }
 
-    pub async fn delete(&self) -> io::Result<()> {
-        self.store.delete(&self.label).await.map(|_| ())
+    pub fn delete(&self) -> io::Result<()> {
+        self.store.delete(&self.label).map(|_| ())
     }
 }
 
@@ -881,56 +871,56 @@ impl Store {
     /// Create a new database with the given name.
     ///
     /// If the database already exists, this will return an error.
-    pub async fn create(&self, label: &str) -> io::Result<NamedGraph> {
-        let label = self.label_store.create_label(label).await?;
+    pub fn create(&self, label: &str) -> io::Result<NamedGraph> {
+        let label = self.label_store.create_label(label)?;
         Ok(NamedGraph::new(label.name, self.clone()))
     }
 
     /// Open an existing database with the given name, or None if it does not exist.
-    pub async fn open(&self, label: &str) -> io::Result<Option<NamedGraph>> {
-        let label = self.label_store.get_label(label).await?;
+    pub fn open(&self, label: &str) -> io::Result<Option<NamedGraph>> {
+        let label = self.label_store.get_label(label)?;
         Ok(label.map(|label| NamedGraph::new(label.name, self.clone())))
     }
 
     /// Delete an existing database with the given name. Returns true if this database was deleted
     /// and false otherwise.
-    pub async fn delete(&self, label: &str) -> io::Result<bool> {
-        self.label_store.delete_label(label).await
+    pub fn delete(&self, label: &str) -> io::Result<bool> {
+        self.label_store.delete_label(label)
     }
 
     /// Return list of names of all existing databases.
-    pub async fn labels(&self) -> io::Result<Vec<String>> {
-        let labels = self.label_store.labels().await?;
+    pub fn labels(&self) -> io::Result<Vec<String>> {
+        let labels = self.label_store.labels()?;
         Ok(labels.iter().map(|label| label.name.to_string()).collect())
     }
 
     /// Retrieve a layer with the given name from the layer store this Store was initialized with.
-    pub async fn get_layer_from_id(&self, layer: [u32; 5]) -> io::Result<Option<StoreLayer>> {
-        let layer = self.layer_store.get_layer(layer).await?;
+    pub fn get_layer_from_id(&self, layer: [u32; 5]) -> io::Result<Option<StoreLayer>> {
+        let layer = self.layer_store.get_layer(layer)?;
         Ok(layer.map(|layer| StoreLayer::wrap(layer, self.clone())))
     }
 
     /// Create a base layer builder, unattached to any database label.
     ///
     /// After having committed it, use `set_head` on a `NamedGraph` to attach it.
-    pub async fn create_base_layer(&self) -> io::Result<StoreLayerBuilder> {
-        StoreLayerBuilder::new(self.clone()).await
+    pub fn create_base_layer(&self) -> io::Result<StoreLayerBuilder> {
+        StoreLayerBuilder::new(self.clone())
     }
 
-    pub async fn merge_base_layers(
+    pub fn merge_base_layers(
         &self,
         layers: &[[u32; 5]],
         temp_dir: &Path,
     ) -> io::Result<[u32; 5]> {
-        self.layer_store.merge_base_layer(layers, temp_dir).await
+        self.layer_store.merge_base_layer(layers, temp_dir)
     }
 
     /// Export the given layers by creating a pack, a Vec<u8> that can later be used with `import_layers` on a different store.
-    pub async fn export_layers(
+    pub fn export_layers(
         &self,
         layer_ids: Box<dyn Iterator<Item = [u32; 5]> + Send>,
     ) -> io::Result<Vec<u8>> {
-        self.layer_store.export_layers(layer_ids).await
+        self.layer_store.export_layers(layer_ids)
     }
 
     /// Import the specified layers from the given pack, a byte slice that was previously generated with `export_layers`, on another store, and possibly even another machine).
@@ -938,12 +928,12 @@ impl Store {
     /// After this operation, the specified layers will be retrievable
     /// from this store, provided they existed in the pack. specified
     /// layers that are not in the pack are silently ignored.
-    pub async fn import_layers<'a>(
+    pub fn import_layers<'a>(
         &'a self,
         pack: &'a [u8],
         layer_ids: Box<dyn Iterator<Item = [u32; 5]> + Send>,
     ) -> io::Result<()> {
-        self.layer_store.import_layers(pack, layer_ids).await
+        self.layer_store.import_layers(pack, layer_ids)
     }
 }
 
@@ -957,42 +947,18 @@ pub fn open_memory_store() -> Store {
     )
 }
 
-/// Open a store that stores its data in the given directory as archive files.
-///
-/// cache_size specifies in megabytes how large the LRU cache should
-/// be. Loaded layers will stick around in the LRU cache to speed up
-/// subsequent loads.
+// Archive store functions temporarily disabled during async stripping.
+// The archive backend requires deep async-to-sync conversion.
+// Use open_directory_store or open_memory_store instead.
+/*
 pub fn open_archive_store<P: Into<PathBuf>>(path: P, cache_size: usize) -> Store {
-    let p = path.into();
-    let directory_archive_backend = DirectoryArchiveBackend::new(p.clone());
-    let archive_backend = LruArchiveBackend::new(
-        directory_archive_backend.clone(),
-        directory_archive_backend,
-        cache_size,
-    );
-    Store::new(
-        DirectoryLabelStore::new(p),
-        CachedLayerStore::new(
-            ArchiveLayerStore::new(archive_backend.clone(), archive_backend),
-            LockingHashMapLayerCache::new(),
-        ),
-    )
+    unimplemented!("archive store not yet converted to sync API")
 }
 
-/// Open a store that stores its data in the given directory as archive files.
-///
-/// This version doesn't use lru caching.
 pub fn open_raw_archive_store<P: Into<PathBuf>>(path: P) -> Store {
-    let p = path.into();
-    let archive_backend = DirectoryArchiveBackend::new(p.clone());
-    Store::new(
-        DirectoryLabelStore::new(p),
-        CachedLayerStore::new(
-            ArchiveLayerStore::new(archive_backend.clone(), archive_backend),
-            LockingHashMapLayerCache::new(),
-        ),
-    )
+    unimplemented!("archive store not yet converted to sync API")
 }
+*/
 
 /// Open a store that stores its data in the given directory.
 pub fn open_directory_store<P: Into<PathBuf>>(path: P) -> Store {
@@ -1003,77 +969,100 @@ pub fn open_directory_store<P: Into<PathBuf>>(path: P) -> Store {
     )
 }
 
+/// Open a store backed by a persistence backend that implements both
+/// `LayerPersistence` and `LabelPersistence`.
+///
+/// This is the generic entry point for creating stores from any persistence
+/// backend (MemoryPersistence, FsPersistence, OpfsPersistence, etc.).
+///
+/// The persistence backend is wrapped in a `PersistenceLayerStore` (which
+/// bridges `LayerPersistence` to the `PersistentLayerStore` trait) and a
+/// `PersistenceLabelStore` (which bridges `LabelPersistence` to `LabelStore`),
+/// with a `CachedLayerStore` providing in-memory layer caching.
+pub fn open_persistence_store<P>(persistence: P) -> Store
+where
+    P: 'static + LayerPersistence + LabelPersistence + Clone + Send + Sync,
+{
+    Store::new(
+        PersistenceLabelStore::new(persistence.clone()),
+        CachedLayerStore::new(
+            PersistenceLayerStore::new(persistence),
+            LockingHashMapLayerCache::new(),
+        ),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use tempfile::tempdir;
 
-    async fn create_and_manipulate_database(store: Store) {
-        let database = store.create("foodb").await.unwrap();
+    fn create_and_manipulate_database(store: Store) {
+        let database = store.create("foodb").unwrap();
 
-        let head = database.head().await.unwrap();
+        let head = database.head().unwrap();
         assert!(head.is_none());
 
-        let mut builder = store.create_base_layer().await.unwrap();
+        let mut builder = store.create_base_layer().unwrap();
         builder
             .add_value_triple(ValueTriple::new_string_value("cow", "says", "moo"))
             .unwrap();
 
-        let layer = builder.commit().await.unwrap();
-        assert!(database.set_head(&layer).await.unwrap());
+        let layer = builder.commit().unwrap();
+        assert!(database.set_head(&layer).unwrap());
 
-        builder = layer.open_write().await.unwrap();
+        builder = layer.open_write().unwrap();
         builder
             .add_value_triple(ValueTriple::new_string_value("pig", "says", "oink"))
             .unwrap();
 
-        let layer2 = builder.commit().await.unwrap();
-        assert!(database.set_head(&layer2).await.unwrap());
+        let layer2 = builder.commit().unwrap();
+        assert!(database.set_head(&layer2).unwrap());
         let layer2_name = layer2.name();
 
-        let layer = database.head().await.unwrap().unwrap();
+        let layer = database.head().unwrap().unwrap();
 
         assert_eq!(layer2_name, layer.name());
         assert!(layer.value_triple_exists(&ValueTriple::new_string_value("cow", "says", "moo")));
         assert!(layer.value_triple_exists(&ValueTriple::new_string_value("pig", "says", "oink")));
     }
 
-    #[tokio::test]
-    async fn create_and_manipulate_memory_database() {
+    #[test]
+    fn create_and_manipulate_memory_database() {
         let store = open_memory_store();
 
-        create_and_manipulate_database(store).await;
+        create_and_manipulate_database(store);
     }
 
-    #[tokio::test]
-    async fn create_and_manipulate_directory_database() {
+    #[test]
+    fn create_and_manipulate_directory_database() {
         let dir = tempdir().unwrap();
         let store = open_directory_store(dir.path());
 
-        create_and_manipulate_database(store).await;
+        create_and_manipulate_database(store);
     }
 
-    #[tokio::test]
-    async fn create_layer_and_retrieve_it_by_id() {
+    #[test]
+    fn create_layer_and_retrieve_it_by_id() {
         let store = open_memory_store();
-        let builder = store.create_base_layer().await.unwrap();
+        let builder = store.create_base_layer().unwrap();
         builder
             .add_value_triple(ValueTriple::new_string_value("cow", "says", "moo"))
             .unwrap();
 
-        let layer = builder.commit().await.unwrap();
+        let layer = builder.commit().unwrap();
 
         let id = layer.name();
 
-        let layer2 = store.get_layer_from_id(id).await.unwrap().unwrap();
+        let layer2 = store.get_layer_from_id(id).unwrap().unwrap();
 
         assert!(layer2.value_triple_exists(&ValueTriple::new_string_value("cow", "says", "moo")));
     }
 
-    #[tokio::test]
-    async fn commit_builder_makes_builder_committed() {
+    #[test]
+    fn commit_builder_makes_builder_committed() {
         let store = open_memory_store();
-        let builder = store.create_base_layer().await.unwrap();
+        let builder = store.create_base_layer().unwrap();
 
         builder
             .add_value_triple(ValueTriple::new_string_value("cow", "says", "moo"))
@@ -1081,35 +1070,35 @@ mod tests {
 
         assert!(!builder.committed());
 
-        builder.commit_no_load().await.unwrap();
+        builder.commit_no_load().unwrap();
 
         assert!(builder.committed());
     }
 
-    #[tokio::test]
-    async fn hard_reset() {
+    #[test]
+    fn hard_reset() {
         let store = open_memory_store();
-        let database = store.create("foodb").await.unwrap();
+        let database = store.create("foodb").unwrap();
 
-        let builder1 = store.create_base_layer().await.unwrap();
+        let builder1 = store.create_base_layer().unwrap();
         builder1
             .add_value_triple(ValueTriple::new_string_value("cow", "says", "moo"))
             .unwrap();
 
-        let layer1 = builder1.commit().await.unwrap();
+        let layer1 = builder1.commit().unwrap();
 
-        assert!(database.set_head(&layer1).await.unwrap());
+        assert!(database.set_head(&layer1).unwrap());
 
-        let builder2 = store.create_base_layer().await.unwrap();
+        let builder2 = store.create_base_layer().unwrap();
         builder2
             .add_value_triple(ValueTriple::new_string_value("duck", "says", "quack"))
             .unwrap();
 
-        let layer2 = builder2.commit().await.unwrap();
+        let layer2 = builder2.commit().unwrap();
 
-        database.force_set_head(&layer2).await.unwrap();
+        database.force_set_head(&layer2).unwrap();
 
-        let new_layer = database.head().await.unwrap().unwrap();
+        let new_layer = database.head().unwrap().unwrap();
 
         assert!(
             new_layer.value_triple_exists(&ValueTriple::new_string_value("duck", "says", "quack"))
@@ -1119,10 +1108,10 @@ mod tests {
         );
     }
 
-    #[tokio::test]
-    async fn create_two_layers_and_squash() {
+    #[test]
+    fn create_two_layers_and_squash() {
         let store = open_memory_store();
-        let builder = store.create_base_layer().await.unwrap();
+        let builder = store.create_base_layer().unwrap();
         builder
             .add_value_triple(ValueTriple::new_string_value("cow", "says", "moo"))
             .unwrap();
@@ -1133,9 +1122,9 @@ mod tests {
             .add_value_triple(ValueTriple::new_node("cow", "likes", "horse"))
             .unwrap();
 
-        let layer = builder.commit().await.unwrap();
+        let layer = builder.commit().unwrap();
 
-        let builder2 = layer.open_write().await.unwrap();
+        let builder2 = layer.open_write().unwrap();
 
         builder2
             .add_value_triple(ValueTriple::new_string_value("dog", "says", "woof"))
@@ -1161,9 +1150,9 @@ mod tests {
             .add_value_triple(ValueTriple::new_node("cow", "likes", "duck"))
             .unwrap();
 
-        let layer2 = builder2.commit().await.unwrap();
+        let layer2 = builder2.commit().unwrap();
 
-        let new = layer2.squash().await.unwrap();
+        let new = layer2.squash().unwrap();
         let triples: Vec<_> = new
             .triples()
             .map(|t| new.id_triple_to_string(&t).unwrap())
@@ -1178,13 +1167,13 @@ mod tests {
             triples
         );
 
-        assert!(new.parent().await.unwrap().is_none());
+        assert!(new.parent().unwrap().is_none());
     }
 
-    #[tokio::test]
-    async fn create_three_layers_and_squash_last_two() {
+    #[test]
+    fn create_three_layers_and_squash_last_two() {
         let store = open_memory_store();
-        let builder = store.create_base_layer().await.unwrap();
+        let builder = store.create_base_layer().unwrap();
         builder
             .add_value_triple(ValueTriple::new_string_value("cow", "says", "quack"))
             .unwrap();
@@ -1195,9 +1184,9 @@ mod tests {
             .add_value_triple(ValueTriple::new_node("cow", "likes", "horse"))
             .unwrap();
 
-        let base_layer = builder.commit().await.unwrap();
+        let base_layer = builder.commit().unwrap();
 
-        let builder = base_layer.open_write().await.unwrap();
+        let builder = base_layer.open_write().unwrap();
         builder
             .add_value_triple(ValueTriple::new_node("bunny", "likes", "cow"))
             .unwrap();
@@ -1214,8 +1203,8 @@ mod tests {
             .remove_value_triple(ValueTriple::new_string_value("cow", "says", "quack"))
             .unwrap();
 
-        let intermediate_layer = builder.commit().await.unwrap();
-        let builder = intermediate_layer.open_write().await.unwrap();
+        let intermediate_layer = builder.commit().unwrap();
+        let builder = intermediate_layer.open_write().unwrap();
         builder
             .remove_value_triple(ValueTriple::new_node("cow", "hates", "duck"))
             .unwrap();
@@ -1231,13 +1220,13 @@ mod tests {
         builder
             .add_value_triple(ValueTriple::new_string_value("bunny", "says", "sniff"))
             .unwrap();
-        let final_layer = builder.commit().await.unwrap();
+        let final_layer = builder.commit().unwrap();
 
-        let squashed_layer = final_layer.squash_upto(&base_layer).await.unwrap();
+        let squashed_layer = final_layer.squash_upto(&base_layer).unwrap();
         assert_eq!(squashed_layer.parent_name().unwrap(), base_layer.name());
         let additions: Vec<_> = squashed_layer
             .triple_additions()
-            .await
+            
             .unwrap()
             .map(|t| squashed_layer.id_triple_to_string(&t).unwrap())
             .collect();
@@ -1254,7 +1243,7 @@ mod tests {
         );
         let removals: Vec<_> = squashed_layer
             .triple_removals()
-            .await
+            
             .unwrap()
             .map(|t| squashed_layer.id_triple_to_string(&t).unwrap())
             .collect();
@@ -1284,10 +1273,10 @@ mod tests {
         );
     }
 
-    #[tokio::test]
-    async fn create_three_layers_and_squash_all_after_rollup() {
+    #[test]
+    fn create_three_layers_and_squash_all_after_rollup() {
         let store = open_memory_store();
-        let builder = store.create_base_layer().await.unwrap();
+        let builder = store.create_base_layer().unwrap();
         builder
             .add_value_triple(ValueTriple::new_string_value("cow", "says", "quack"))
             .unwrap();
@@ -1298,9 +1287,9 @@ mod tests {
             .add_value_triple(ValueTriple::new_node("cow", "likes", "horse"))
             .unwrap();
 
-        let base_layer = builder.commit().await.unwrap();
+        let base_layer = builder.commit().unwrap();
 
-        let builder = base_layer.open_write().await.unwrap();
+        let builder = base_layer.open_write().unwrap();
         builder
             .add_value_triple(ValueTriple::new_node("bunny", "likes", "cow"))
             .unwrap();
@@ -1317,8 +1306,8 @@ mod tests {
             .remove_value_triple(ValueTriple::new_string_value("cow", "says", "quack"))
             .unwrap();
 
-        let intermediate_layer = builder.commit().await.unwrap();
-        let builder = intermediate_layer.open_write().await.unwrap();
+        let intermediate_layer = builder.commit().unwrap();
+        let builder = intermediate_layer.open_write().unwrap();
         builder
             .remove_value_triple(ValueTriple::new_node("cow", "hates", "duck"))
             .unwrap();
@@ -1334,15 +1323,15 @@ mod tests {
         builder
             .add_value_triple(ValueTriple::new_string_value("bunny", "says", "sniff"))
             .unwrap();
-        let final_layer = builder.commit().await.unwrap();
-        final_layer.rollup_upto(&base_layer).await.unwrap();
+        let final_layer = builder.commit().unwrap();
+        final_layer.rollup_upto(&base_layer).unwrap();
         let final_rolled_layer = store
             .get_layer_from_id(final_layer.name())
-            .await
+            
             .unwrap()
             .unwrap();
 
-        let squashed_layer = final_rolled_layer.squash().await.unwrap();
+        let squashed_layer = final_rolled_layer.squash().unwrap();
         assert!(squashed_layer.parent_name().is_none());
 
         let all_triples: Vec<_> = squashed_layer
@@ -1363,10 +1352,10 @@ mod tests {
         );
     }
 
-    #[tokio::test]
-    async fn create_three_layers_and_squash_last_two_after_rollup() {
+    #[test]
+    fn create_three_layers_and_squash_last_two_after_rollup() {
         let store = open_memory_store();
-        let builder = store.create_base_layer().await.unwrap();
+        let builder = store.create_base_layer().unwrap();
         builder
             .add_value_triple(ValueTriple::new_string_value("cow", "says", "quack"))
             .unwrap();
@@ -1377,9 +1366,9 @@ mod tests {
             .add_value_triple(ValueTriple::new_node("cow", "likes", "horse"))
             .unwrap();
 
-        let base_layer = builder.commit().await.unwrap();
+        let base_layer = builder.commit().unwrap();
 
-        let builder = base_layer.open_write().await.unwrap();
+        let builder = base_layer.open_write().unwrap();
         builder
             .add_value_triple(ValueTriple::new_node("bunny", "likes", "cow"))
             .unwrap();
@@ -1396,8 +1385,8 @@ mod tests {
             .remove_value_triple(ValueTriple::new_string_value("cow", "says", "quack"))
             .unwrap();
 
-        let intermediate_layer = builder.commit().await.unwrap();
-        let builder = intermediate_layer.open_write().await.unwrap();
+        let intermediate_layer = builder.commit().unwrap();
+        let builder = intermediate_layer.open_write().unwrap();
         builder
             .remove_value_triple(ValueTriple::new_node("cow", "hates", "duck"))
             .unwrap();
@@ -1413,19 +1402,19 @@ mod tests {
         builder
             .add_value_triple(ValueTriple::new_string_value("bunny", "says", "sniff"))
             .unwrap();
-        let final_layer = builder.commit().await.unwrap();
-        final_layer.rollup_upto(&base_layer).await.unwrap();
+        let final_layer = builder.commit().unwrap();
+        final_layer.rollup_upto(&base_layer).unwrap();
         let final_rolled_layer = store
             .get_layer_from_id(final_layer.name())
-            .await
+            
             .unwrap()
             .unwrap();
 
-        let squashed_layer = final_rolled_layer.squash_upto(&base_layer).await.unwrap();
+        let squashed_layer = final_rolled_layer.squash_upto(&base_layer).unwrap();
         assert_eq!(squashed_layer.parent_name().unwrap(), base_layer.name());
         let additions: Vec<_> = squashed_layer
             .triple_additions()
-            .await
+            
             .unwrap()
             .map(|t| squashed_layer.id_triple_to_string(&t).unwrap())
             .collect();
@@ -1442,7 +1431,7 @@ mod tests {
         );
         let removals: Vec<_> = squashed_layer
             .triple_removals()
-            .await
+            
             .unwrap()
             .map(|t| squashed_layer.id_triple_to_string(&t).unwrap())
             .collect();
@@ -1472,10 +1461,10 @@ mod tests {
         );
     }
 
-    #[tokio::test]
-    async fn squash_and_forget_dict_entries() {
+    #[test]
+    fn squash_and_forget_dict_entries() {
         let store = open_memory_store();
-        let builder = store.create_base_layer().await.unwrap();
+        let builder = store.create_base_layer().unwrap();
         builder
             .add_value_triple(ValueTriple::new_node("a", "b", "anode"))
             .unwrap();
@@ -1489,23 +1478,23 @@ mod tests {
             .add_value_triple(ValueTriple::new_string_value("a", "c", "anotherstring"))
             .unwrap();
 
-        let base_layer = builder.commit().await.unwrap();
+        let base_layer = builder.commit().unwrap();
 
-        let builder = base_layer.open_write().await.unwrap();
+        let builder = base_layer.open_write().unwrap();
         builder
             .remove_value_triple(ValueTriple::new_node("a", "c", "anothernode"))
             .unwrap();
         builder
             .remove_value_triple(ValueTriple::new_string_value("a", "c", "anotherstring"))
             .unwrap();
-        let child_layer = builder.commit().await.unwrap();
+        let child_layer = builder.commit().unwrap();
 
-        let squashed = child_layer.squash().await.unwrap();
+        let squashed = child_layer.squash().unwrap();
         // annoyingly we need to get the internal layer version, so lets re-retrieve
         let squashed = store
             .layer_store
             .get_layer(squashed.name())
-            .await
+            
             .unwrap()
             .unwrap();
         let nodes: Vec<_> = squashed
@@ -1540,10 +1529,10 @@ mod tests {
         );
     }
 
-    #[tokio::test]
-    async fn squash_upto_and_forget_dict_entries() {
+    #[test]
+    fn squash_upto_and_forget_dict_entries() {
         let store = open_memory_store();
-        let builder = store.create_base_layer().await.unwrap();
+        let builder = store.create_base_layer().unwrap();
         builder
             .add_value_triple(ValueTriple::new_node("foo", "bar", "baz"))
             .unwrap();
@@ -1553,8 +1542,8 @@ mod tests {
         builder
             .add_value_triple(ValueTriple::new_string_value("foo", "baz", "hai"))
             .unwrap();
-        let base_layer = builder.commit().await.unwrap();
-        let builder = base_layer.open_write().await.unwrap();
+        let base_layer = builder.commit().unwrap();
+        let builder = base_layer.open_write().unwrap();
         builder
             .remove_value_triple(ValueTriple::new_string_value("foo", "baz", "hai"))
             .unwrap();
@@ -1571,9 +1560,9 @@ mod tests {
             .add_value_triple(ValueTriple::new_string_value("a", "c", "anotherstring"))
             .unwrap();
 
-        let child_layer1 = builder.commit().await.unwrap();
+        let child_layer1 = builder.commit().unwrap();
 
-        let builder = child_layer1.open_write().await.unwrap();
+        let builder = child_layer1.open_write().unwrap();
         builder
             .remove_value_triple(ValueTriple::new_node("foo", "bar", "baz"))
             .unwrap();
@@ -1583,14 +1572,14 @@ mod tests {
         builder
             .remove_value_triple(ValueTriple::new_string_value("a", "c", "anotherstring"))
             .unwrap();
-        let child_layer2 = builder.commit().await.unwrap();
+        let child_layer2 = builder.commit().unwrap();
 
-        let squashed = child_layer2.squash_upto(&base_layer).await.unwrap();
+        let squashed = child_layer2.squash_upto(&base_layer).unwrap();
         // annoyingly we need to get the internal layer version, so lets re-retrieve
         let squashed = store
             .layer_store
             .get_layer(squashed.name())
-            .await
+            
             .unwrap()
             .unwrap();
         let nodes: Vec<_> = squashed
@@ -1636,26 +1625,26 @@ mod tests {
         );
     }
 
-    #[tokio::test]
-    async fn apply_a_base_delta() {
+    #[test]
+    fn apply_a_base_delta() {
         let store = open_memory_store();
-        let builder = store.create_base_layer().await.unwrap();
+        let builder = store.create_base_layer().unwrap();
 
         builder
             .add_value_triple(ValueTriple::new_string_value("cow", "says", "moo"))
             .unwrap();
 
-        let layer = builder.commit().await.unwrap();
+        let layer = builder.commit().unwrap();
 
-        let builder2 = layer.open_write().await.unwrap();
+        let builder2 = layer.open_write().unwrap();
 
         builder2
             .add_value_triple(ValueTriple::new_string_value("dog", "says", "woof"))
             .unwrap();
 
-        let layer2 = builder2.commit().await.unwrap();
+        let layer2 = builder2.commit().unwrap();
 
-        let delta_builder_1 = store.create_base_layer().await.unwrap();
+        let delta_builder_1 = store.create_base_layer().unwrap();
 
         delta_builder_1
             .add_value_triple(ValueTriple::new_string_value("dog", "says", "woof"))
@@ -1664,9 +1653,9 @@ mod tests {
             .add_value_triple(ValueTriple::new_string_value("cat", "says", "meow"))
             .unwrap();
 
-        let delta_1 = delta_builder_1.commit().await.unwrap();
+        let delta_1 = delta_builder_1.commit().unwrap();
 
-        let delta_builder_2 = delta_1.open_write().await.unwrap();
+        let delta_builder_2 = delta_1.open_write().unwrap();
 
         delta_builder_2
             .add_value_triple(ValueTriple::new_string_value("crow", "says", "caw"))
@@ -1675,13 +1664,13 @@ mod tests {
             .remove_value_triple(ValueTriple::new_string_value("cat", "says", "meow"))
             .unwrap();
 
-        let delta = delta_builder_2.commit().await.unwrap();
+        let delta = delta_builder_2.commit().unwrap();
 
-        let rebase_builder = layer2.open_write().await.unwrap();
+        let rebase_builder = layer2.open_write().unwrap();
 
-        let _ = rebase_builder.apply_delta(&delta).await.unwrap();
+        let _ = rebase_builder.apply_delta(&delta).unwrap();
 
-        let rebase_layer = rebase_builder.commit().await.unwrap();
+        let rebase_layer = rebase_builder.commit().unwrap();
 
         assert!(
             rebase_layer.value_triple_exists(&ValueTriple::new_string_value("cow", "says", "moo"))
@@ -1696,10 +1685,10 @@ mod tests {
             .value_triple_exists(&ValueTriple::new_string_value("cat", "says", "meow")));
     }
 
-    #[tokio::test]
-    async fn apply_a_merge() {
+    #[test]
+    fn apply_a_merge() {
         let store = open_memory_store();
-        let builder = store.create_base_layer().await.unwrap();
+        let builder = store.create_base_layer().unwrap();
 
         builder
             .add_value_triple(ValueTriple::new_string_value("cow", "says", "moo"))
@@ -1708,37 +1697,37 @@ mod tests {
             .add_value_triple(ValueTriple::new_string_value("cat", "says", "meow"))
             .unwrap();
 
-        let merge_base = builder.commit().await.unwrap();
+        let merge_base = builder.commit().unwrap();
 
-        let builder2 = merge_base.open_write().await.unwrap();
+        let builder2 = merge_base.open_write().unwrap();
 
         builder2
             .add_value_triple(ValueTriple::new_string_value("dog", "says", "woof"))
             .unwrap();
 
-        let layer2 = builder2.commit().await.unwrap();
+        let layer2 = builder2.commit().unwrap();
 
-        let builder3 = merge_base.open_write().await.unwrap();
+        let builder3 = merge_base.open_write().unwrap();
 
         builder3
             .remove_value_triple(ValueTriple::new_string_value("cow", "says", "moo"))
             .unwrap();
 
-        let layer3 = builder3.commit().await.unwrap();
+        let layer3 = builder3.commit().unwrap();
 
-        let builder4 = merge_base.open_write().await.unwrap();
+        let builder4 = merge_base.open_write().unwrap();
 
         builder4
             .add_value_triple(ValueTriple::new_string_value("bird", "says", "twe"))
             .unwrap();
 
-        let layer4 = builder4.commit().await.unwrap();
+        let layer4 = builder4.commit().unwrap();
 
-        let merge_builder = layer4.open_write().await.unwrap();
+        let merge_builder = layer4.open_write().unwrap();
 
         let _ = merge_builder.apply_merge(vec![&layer2, &layer3], Some(&merge_base));
 
-        let merged_layer = merge_builder.commit().await.unwrap();
+        let merged_layer = merge_builder.commit().unwrap();
 
         assert!(
             merged_layer.value_triple_exists(&ValueTriple::new_string_value("cat", "says", "meow"))
@@ -1754,214 +1743,420 @@ mod tests {
         );
     }
 
-    async fn cached_layer_name_does_not_change_after_rollup(store: Store) {
-        let builder = store.create_base_layer().await.unwrap();
-        let base_name = builder.name();
-        let x = builder.commit().await.unwrap();
-        let builder = x.open_write().await.unwrap();
-        let child_name = builder.name();
-        builder.commit().await.unwrap();
+    #[test]
+    fn apply_diff_rebases_parent_to_target() {
+        let store = open_memory_store();
 
-        let unrolled_layer = store.get_layer_from_id(child_name).await.unwrap().unwrap();
+        // Create a base layer with shared triples
+        let builder = store.create_base_layer().unwrap();
+        builder
+            .add_value_triple(ValueTriple::new_string_value("cow", "says", "moo"))
+            .unwrap();
+        builder
+            .add_value_triple(ValueTriple::new_string_value("cat", "says", "meow"))
+            .unwrap();
+        let base = builder.commit().unwrap();
+
+        // Create a divergent target layer: removes cow, adds dog
+        let target_builder = base.open_write().unwrap();
+        target_builder
+            .remove_value_triple(ValueTriple::new_string_value("cow", "says", "moo"))
+            .unwrap();
+        target_builder
+            .add_value_triple(ValueTriple::new_string_value("dog", "says", "woof"))
+            .unwrap();
+        let target = target_builder.commit().unwrap();
+
+        // Create a child of base and apply_diff to rebase onto target
+        let diff_builder = base.open_write().unwrap();
+        diff_builder.apply_diff(&target).unwrap();
+        let diffed = diff_builder.commit().unwrap();
+
+        // Result should match target: cat + dog, no cow
+        assert!(
+            diffed.value_triple_exists(&ValueTriple::new_string_value("cat", "says", "meow"))
+        );
+        assert!(
+            diffed.value_triple_exists(&ValueTriple::new_string_value("dog", "says", "woof"))
+        );
+        assert!(
+            !diffed.value_triple_exists(&ValueTriple::new_string_value("cow", "says", "moo"))
+        );
+    }
+
+    #[test]
+    fn apply_diff_no_parent_adds_all_target_triples() {
+        let store = open_memory_store();
+
+        // Create a target layer with some triples
+        let target_builder = store.create_base_layer().unwrap();
+        target_builder
+            .add_value_triple(ValueTriple::new_string_value("dog", "says", "woof"))
+            .unwrap();
+        target_builder
+            .add_value_triple(ValueTriple::new_string_value("cat", "says", "meow"))
+            .unwrap();
+        let target = target_builder.commit().unwrap();
+
+        // Create a base layer builder (no parent) and apply_diff
+        let diff_builder = store.create_base_layer().unwrap();
+        diff_builder.apply_diff(&target).unwrap();
+        let diffed = diff_builder.commit().unwrap();
+
+        // All target triples should be added
+        assert!(
+            diffed.value_triple_exists(&ValueTriple::new_string_value("dog", "says", "woof"))
+        );
+        assert!(
+            diffed.value_triple_exists(&ValueTriple::new_string_value("cat", "says", "meow"))
+        );
+    }
+
+    #[test]
+    fn apply_merge_without_merge_base_adds_all_triples() {
+        let store = open_memory_store();
+
+        // Create two independent layers
+        let builder1 = store.create_base_layer().unwrap();
+        builder1
+            .add_value_triple(ValueTriple::new_string_value("dog", "says", "woof"))
+            .unwrap();
+        let layer1 = builder1.commit().unwrap();
+
+        let builder2 = store.create_base_layer().unwrap();
+        builder2
+            .add_value_triple(ValueTriple::new_string_value("cat", "says", "meow"))
+            .unwrap();
+        let layer2 = builder2.commit().unwrap();
+
+        // Merge without merge base (None) — should add all triples from all others
+        let merge_builder = store.create_base_layer().unwrap();
+        merge_builder
+            .apply_merge(vec![&layer1, &layer2], None)
+            .unwrap();
+        let merged = merge_builder.commit().unwrap();
+
+        assert!(
+            merged.value_triple_exists(&ValueTriple::new_string_value("dog", "says", "woof"))
+        );
+        assert!(
+            merged.value_triple_exists(&ValueTriple::new_string_value("cat", "says", "meow"))
+        );
+    }
+
+    #[test]
+    fn merge_union_of_additions_from_all_branches() {
+        let store = open_memory_store();
+        let builder = store.create_base_layer().unwrap();
+        builder
+            .add_value_triple(ValueTriple::new_string_value("base", "has", "triple"))
+            .unwrap();
+        let merge_base = builder.commit().unwrap();
+
+        // Branch A adds "dog says woof"
+        let branch_a_builder = merge_base.open_write().unwrap();
+        branch_a_builder
+            .add_value_triple(ValueTriple::new_string_value("dog", "says", "woof"))
+            .unwrap();
+        let branch_a = branch_a_builder.commit().unwrap();
+
+        // Branch B adds "bird says tweet"
+        let branch_b_builder = merge_base.open_write().unwrap();
+        branch_b_builder
+            .add_value_triple(ValueTriple::new_string_value("bird", "says", "tweet"))
+            .unwrap();
+        let branch_b = branch_b_builder.commit().unwrap();
+
+        // Merge on top of branch_a
+        let merge_builder = branch_a.open_write().unwrap();
+        merge_builder
+            .apply_merge(vec![&branch_a, &branch_b], Some(&merge_base))
+            .unwrap();
+        let merged = merge_builder.commit().unwrap();
+
+        // Union: both additions present
+        assert!(merged.value_triple_exists(&ValueTriple::new_string_value("dog", "says", "woof")));
+        assert!(merged.value_triple_exists(&ValueTriple::new_string_value("bird", "says", "tweet")));
+        // Base triple still present (not removed by any branch)
+        assert!(merged.value_triple_exists(&ValueTriple::new_string_value("base", "has", "triple")));
+    }
+
+    #[test]
+    fn merge_removal_wins_conflict_resolution() {
+        let store = open_memory_store();
+        let builder = store.create_base_layer().unwrap();
+        builder
+            .add_value_triple(ValueTriple::new_string_value("cow", "says", "moo"))
+            .unwrap();
+        builder
+            .add_value_triple(ValueTriple::new_string_value("cat", "says", "meow"))
+            .unwrap();
+        let merge_base = builder.commit().unwrap();
+
+        // Branch A: keeps both triples, adds one
+        let branch_a_builder = merge_base.open_write().unwrap();
+        branch_a_builder
+            .add_value_triple(ValueTriple::new_string_value("dog", "says", "woof"))
+            .unwrap();
+        let branch_a = branch_a_builder.commit().unwrap();
+
+        // Branch B: removes "cow says moo"
+        let branch_b_builder = merge_base.open_write().unwrap();
+        branch_b_builder
+            .remove_value_triple(ValueTriple::new_string_value("cow", "says", "moo"))
+            .unwrap();
+        let branch_b = branch_b_builder.commit().unwrap();
+
+        let merge_builder = branch_a.open_write().unwrap();
+        merge_builder
+            .apply_merge(vec![&branch_a, &branch_b], Some(&merge_base))
+            .unwrap();
+        let merged = merge_builder.commit().unwrap();
+
+        // Removal wins: cow removed by branch B, so absent in merged
+        assert!(!merged.value_triple_exists(&ValueTriple::new_string_value("cow", "says", "moo")));
+        // cat still present (not removed by any branch)
+        assert!(merged.value_triple_exists(&ValueTriple::new_string_value("cat", "says", "meow")));
+        // dog added by branch A
+        assert!(merged.value_triple_exists(&ValueTriple::new_string_value("dog", "says", "woof")));
+    }
+
+    #[test]
+    fn merge_error_if_fewer_than_two_layers() {
+        let store = open_memory_store();
+        let builder = store.create_base_layer().unwrap();
+        builder
+            .add_value_triple(ValueTriple::new_string_value("cow", "says", "moo"))
+            .unwrap();
+        let base = builder.commit().unwrap();
+
+        let child_builder = base.open_write().unwrap();
+        child_builder
+            .add_value_triple(ValueTriple::new_string_value("dog", "says", "woof"))
+            .unwrap();
+        let child = child_builder.commit().unwrap();
+
+        // Try merge with only one layer — should error
+        let merge_builder = child.open_write().unwrap();
+        let result = merge_builder.apply_merge(vec![&child], Some(&base));
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().kind(), io::ErrorKind::InvalidInput);
+
+        // Try merge with zero layers — should error
+        let merge_builder2 = child.open_write().unwrap();
+        let result2 = merge_builder2.apply_merge(vec![], Some(&base));
+        assert!(result2.is_err());
+        assert_eq!(result2.unwrap_err().kind(), io::ErrorKind::InvalidInput);
+    }
+
+    fn cached_layer_name_does_not_change_after_rollup(store: Store) {
+        let builder = store.create_base_layer().unwrap();
+        let base_name = builder.name();
+        let x = builder.commit().unwrap();
+        let builder = x.open_write().unwrap();
+        let child_name = builder.name();
+        builder.commit().unwrap();
+
+        let unrolled_layer = store.get_layer_from_id(child_name).unwrap().unwrap();
         let unrolled_name = unrolled_layer.name();
         let unrolled_parent_name = unrolled_layer.parent_name().unwrap();
         assert_eq!(child_name, unrolled_name);
         assert_eq!(base_name, unrolled_parent_name);
 
-        unrolled_layer.rollup().await.unwrap();
-        let rolled_layer = store.get_layer_from_id(child_name).await.unwrap().unwrap();
+        unrolled_layer.rollup().unwrap();
+        let rolled_layer = store.get_layer_from_id(child_name).unwrap().unwrap();
         let rolled_name = rolled_layer.name();
         let rolled_parent_name = rolled_layer.parent_name().unwrap();
         assert_eq!(child_name, rolled_name);
         assert_eq!(base_name, rolled_parent_name);
 
-        rolled_layer.rollup().await.unwrap();
-        let rolled_layer2 = store.get_layer_from_id(child_name).await.unwrap().unwrap();
+        rolled_layer.rollup().unwrap();
+        let rolled_layer2 = store.get_layer_from_id(child_name).unwrap().unwrap();
         let rolled_name2 = rolled_layer2.name();
         let rolled_parent_name2 = rolled_layer2.parent_name().unwrap();
         assert_eq!(child_name, rolled_name2);
         assert_eq!(base_name, rolled_parent_name2);
     }
 
-    #[tokio::test]
-    async fn mem_cached_layer_name_does_not_change_after_rollup() {
+    #[test]
+    fn mem_cached_layer_name_does_not_change_after_rollup() {
         let store = open_memory_store();
 
-        cached_layer_name_does_not_change_after_rollup(store).await
+        cached_layer_name_does_not_change_after_rollup(store)
     }
 
-    #[tokio::test]
-    async fn dir_cached_layer_name_does_not_change_after_rollup() {
+    #[test]
+    fn dir_cached_layer_name_does_not_change_after_rollup() {
         let dir = tempdir().unwrap();
         let store = open_directory_store(dir.path());
 
-        cached_layer_name_does_not_change_after_rollup(store).await
+        cached_layer_name_does_not_change_after_rollup(store)
     }
 
-    async fn cached_layer_name_does_not_change_after_rollup_upto(store: Store) {
-        let builder = store.create_base_layer().await.unwrap();
+    fn cached_layer_name_does_not_change_after_rollup_upto(store: Store) {
+        let builder = store.create_base_layer().unwrap();
         let _base_name = builder.name();
-        let base_layer = builder.commit().await.unwrap();
-        let builder = base_layer.open_write().await.unwrap();
+        let base_layer = builder.commit().unwrap();
+        let builder = base_layer.open_write().unwrap();
         let child_name = builder.name();
-        let x = builder.commit().await.unwrap();
-        let builder = x.open_write().await.unwrap();
+        let x = builder.commit().unwrap();
+        let builder = x.open_write().unwrap();
         let child_name2 = builder.name();
-        builder.commit().await.unwrap();
+        builder.commit().unwrap();
 
-        let unrolled_layer = store.get_layer_from_id(child_name2).await.unwrap().unwrap();
+        let unrolled_layer = store.get_layer_from_id(child_name2).unwrap().unwrap();
         let unrolled_name = unrolled_layer.name();
         let unrolled_parent_name = unrolled_layer.parent_name().unwrap();
         assert_eq!(child_name2, unrolled_name);
         assert_eq!(child_name, unrolled_parent_name);
 
-        unrolled_layer.rollup_upto(&base_layer).await.unwrap();
-        let rolled_layer = store.get_layer_from_id(child_name2).await.unwrap().unwrap();
+        unrolled_layer.rollup_upto(&base_layer).unwrap();
+        let rolled_layer = store.get_layer_from_id(child_name2).unwrap().unwrap();
         let rolled_name = rolled_layer.name();
         let rolled_parent_name = rolled_layer.parent_name().unwrap();
         assert_eq!(child_name2, rolled_name);
         assert_eq!(child_name, rolled_parent_name);
 
-        rolled_layer.rollup_upto(&base_layer).await.unwrap();
-        let rolled_layer2 = store.get_layer_from_id(child_name2).await.unwrap().unwrap();
+        rolled_layer.rollup_upto(&base_layer).unwrap();
+        let rolled_layer2 = store.get_layer_from_id(child_name2).unwrap().unwrap();
         let rolled_name2 = rolled_layer2.name();
         let rolled_parent_name2 = rolled_layer2.parent_name().unwrap();
         assert_eq!(child_name2, rolled_name2);
         assert_eq!(child_name, rolled_parent_name2);
     }
 
-    #[tokio::test]
-    async fn mem_cached_layer_name_does_not_change_after_rollup_upto() {
+    #[test]
+    fn mem_cached_layer_name_does_not_change_after_rollup_upto() {
         let store = open_memory_store();
-        cached_layer_name_does_not_change_after_rollup_upto(store).await
+        cached_layer_name_does_not_change_after_rollup_upto(store)
     }
 
-    #[tokio::test]
-    async fn dir_cached_layer_name_does_not_change_after_rollup_upto() {
+    #[test]
+    fn dir_cached_layer_name_does_not_change_after_rollup_upto() {
         let dir = tempdir().unwrap();
         let store = open_directory_store(dir.path());
-        cached_layer_name_does_not_change_after_rollup_upto(store).await
+        cached_layer_name_does_not_change_after_rollup_upto(store)
     }
 
-    #[tokio::test]
-    async fn force_update_with_matching_0_version_succeeds() {
+    #[test]
+    fn force_update_with_matching_0_version_succeeds() {
         let dir = tempdir().unwrap();
         let store = open_directory_store(dir.path());
-        let graph = store.create("foo").await.unwrap();
-        let (layer, version) = graph.head_version().await.unwrap();
+        let graph = store.create("foo").unwrap();
+        let (layer, version) = graph.head_version().unwrap();
         assert!(layer.is_none());
         assert_eq!(0, version);
 
-        let builder = store.create_base_layer().await.unwrap();
-        let layer = builder.commit().await.unwrap();
+        let builder = store.create_base_layer().unwrap();
+        let layer = builder.commit().unwrap();
 
-        assert!(graph.force_set_head_version(&layer, 0).await.unwrap());
+        assert!(graph.force_set_head_version(&layer, 0).unwrap());
     }
 
-    #[tokio::test]
-    async fn force_update_with_mismatching_0_version_succeeds() {
+    #[test]
+    fn force_update_with_mismatching_0_version_succeeds() {
         let dir = tempdir().unwrap();
         let store = open_directory_store(dir.path());
-        let graph = store.create("foo").await.unwrap();
-        let (layer, version) = graph.head_version().await.unwrap();
+        let graph = store.create("foo").unwrap();
+        let (layer, version) = graph.head_version().unwrap();
         assert!(layer.is_none());
         assert_eq!(0, version);
 
-        let builder = store.create_base_layer().await.unwrap();
-        let layer = builder.commit().await.unwrap();
+        let builder = store.create_base_layer().unwrap();
+        let layer = builder.commit().unwrap();
 
-        assert!(!graph.force_set_head_version(&layer, 3).await.unwrap());
+        assert!(!graph.force_set_head_version(&layer, 3).unwrap());
     }
 
-    #[tokio::test]
-    async fn force_update_with_matching_version_succeeds() {
+    #[test]
+    fn force_update_with_matching_version_succeeds() {
         let dir = tempdir().unwrap();
         let store = open_directory_store(dir.path());
-        let graph = store.create("foo").await.unwrap();
+        let graph = store.create("foo").unwrap();
 
-        let builder = store.create_base_layer().await.unwrap();
-        let layer = builder.commit().await.unwrap();
-        assert!(graph.set_head(&layer).await.unwrap());
+        let builder = store.create_base_layer().unwrap();
+        let layer = builder.commit().unwrap();
+        assert!(graph.set_head(&layer).unwrap());
 
-        let (_, version) = graph.head_version().await.unwrap();
+        let (_, version) = graph.head_version().unwrap();
         assert_eq!(1, version);
 
-        let builder2 = store.create_base_layer().await.unwrap();
-        let layer2 = builder2.commit().await.unwrap();
+        let builder2 = store.create_base_layer().unwrap();
+        let layer2 = builder2.commit().unwrap();
 
-        assert!(graph.force_set_head_version(&layer2, 1).await.unwrap());
+        assert!(graph.force_set_head_version(&layer2, 1).unwrap());
     }
 
-    #[tokio::test]
-    async fn force_update_with_mismatched_version_succeeds() {
+    #[test]
+    fn force_update_with_mismatched_version_succeeds() {
         let dir = tempdir().unwrap();
         let store = open_directory_store(dir.path());
-        let graph = store.create("foo").await.unwrap();
+        let graph = store.create("foo").unwrap();
 
-        let builder = store.create_base_layer().await.unwrap();
-        let layer = builder.commit().await.unwrap();
-        assert!(graph.set_head(&layer).await.unwrap());
+        let builder = store.create_base_layer().unwrap();
+        let layer = builder.commit().unwrap();
+        assert!(graph.set_head(&layer).unwrap());
 
-        let (_, version) = graph.head_version().await.unwrap();
+        let (_, version) = graph.head_version().unwrap();
         assert_eq!(1, version);
 
-        let builder2 = store.create_base_layer().await.unwrap();
-        let layer2 = builder2.commit().await.unwrap();
+        let builder2 = store.create_base_layer().unwrap();
+        let layer2 = builder2.commit().unwrap();
 
-        assert!(!graph.force_set_head_version(&layer2, 0).await.unwrap());
+        assert!(!graph.force_set_head_version(&layer2, 0).unwrap());
     }
 
-    #[tokio::test]
-    async fn delete_database() {
+    #[test]
+    fn delete_database() {
         let dir = tempdir().unwrap();
         let store = open_directory_store(dir.path());
-        let _ = store.create("foo").await.unwrap();
-        assert!(store.delete("foo").await.unwrap());
-        assert!(store.open("foo").await.unwrap().is_none());
+        let _ = store.create("foo").unwrap();
+        assert!(store.delete("foo").unwrap());
+        assert!(store.open("foo").unwrap().is_none());
     }
 
-    #[tokio::test]
-    async fn delete_nonexistent_database() {
+    #[test]
+    fn delete_nonexistent_database() {
         let dir = tempdir().unwrap();
         let store = open_directory_store(dir.path());
-        assert!(!store.delete("foo").await.unwrap());
+        assert!(!store.delete("foo").unwrap());
     }
 
-    #[tokio::test]
-    async fn delete_graph() {
+    #[test]
+    fn delete_graph() {
         let dir = tempdir().unwrap();
         let store = open_directory_store(dir.path());
-        let graph = store.create("foo").await.unwrap();
-        assert!(store.open("foo").await.unwrap().is_some());
-        graph.delete().await.unwrap();
-        assert!(store.open("foo").await.unwrap().is_none());
+        let graph = store.create("foo").unwrap();
+        assert!(store.open("foo").unwrap().is_some());
+        graph.delete().unwrap();
+        assert!(store.open("foo").unwrap().is_none());
     }
 
-    #[tokio::test]
-    async fn recreate_graph() {
+    #[test]
+    fn recreate_graph() {
         let dir = tempdir().unwrap();
         let store = open_directory_store(dir.path());
-        let graph = store.create("foo").await.unwrap();
-        let builder = store.create_base_layer().await.unwrap();
-        let layer = builder.commit().await.unwrap();
-        graph.set_head(&layer).await.unwrap();
-        assert!(graph.head().await.unwrap().is_some());
-        graph.delete().await.unwrap();
-        store.create("foo").await.unwrap();
-        assert!(graph.head().await.unwrap().is_none());
+        let graph = store.create("foo").unwrap();
+        let builder = store.create_base_layer().unwrap();
+        let layer = builder.commit().unwrap();
+        graph.set_head(&layer).unwrap();
+        assert!(graph.head().unwrap().is_some());
+        graph.delete().unwrap();
+        store.create("foo").unwrap();
+        assert!(graph.head().unwrap().is_none());
     }
 
-    #[tokio::test]
-    async fn list_databases() {
+    #[test]
+    fn list_databases() {
         let dir = tempdir().unwrap();
         let store = open_directory_store(dir.path());
-        assert!(store.labels().await.unwrap().is_empty());
-        let _ = store.create("foo").await.unwrap();
+        assert!(store.labels().unwrap().is_empty());
+        let _ = store.create("foo").unwrap();
         let one = vec!["foo".to_string()];
-        assert_eq!(store.labels().await.unwrap(), one);
-        let _ = store.create("bar").await.unwrap();
+        assert_eq!(store.labels().unwrap(), one);
+        let _ = store.create("bar").unwrap();
         let two = vec!["bar".to_string(), "foo".to_string()];
-        let mut left = store.labels().await.unwrap();
+        let mut left = store.labels().unwrap();
         left.sort();
         assert_eq!(left, two);
     }

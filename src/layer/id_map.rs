@@ -2,8 +2,8 @@ use super::*;
 use crate::storage::{BitIndexMaps, FileLoad, FileStore, IdMapFiles};
 use std::convert::TryInto;
 use std::io;
-use tdb_succinct::util::sorted_iterator;
-use tdb_succinct::*;
+use tdb_succinct_wasm::util::sorted_iterator;
+use tdb_succinct_wasm::*;
 
 #[derive(Clone)]
 pub struct IdMap {
@@ -56,26 +56,26 @@ impl IdMap {
     }
 }
 
-pub async fn memory_construct_idmaps<F: 'static + FileLoad + FileStore>(
+pub fn memory_construct_idmaps<F: 'static + FileLoad + FileStore>(
     input: &InternalLayer,
     idmap_files: IdMapFiles<F>,
 ) -> io::Result<()> {
     let layers = input.immediate_layers();
 
-    construct_idmaps_from_layers(&layers, idmap_files).await
+    construct_idmaps_from_layers(&layers, idmap_files)
 }
 
-pub async fn memory_construct_idmaps_upto<F: 'static + FileLoad + FileStore>(
+pub fn memory_construct_idmaps_upto<F: 'static + FileLoad + FileStore>(
     input: &InternalLayer,
     upto_layer_id: [u32; 5],
     idmap_files: IdMapFiles<F>,
 ) -> io::Result<()> {
     let layers = input.immediate_layers_upto(upto_layer_id);
 
-    construct_idmaps_from_layers(&layers, idmap_files).await
+    construct_idmaps_from_layers(&layers, idmap_files)
 }
 
-pub async fn construct_idmaps_from_structures<F: 'static + FileLoad + FileStore>(
+pub fn construct_idmaps_from_structures<F: 'static + FileLoad + FileStore>(
     node_dicts: Vec<StringDict>,
     predicate_dicts: Vec<StringDict>,
     value_dicts: Vec<TypedDict>,
@@ -161,27 +161,24 @@ pub async fn construct_idmaps_from_structures<F: 'static + FileLoad + FileStore>
         sorted_iterator(predicate_iters, entry_comparator).map(|(id, _)| id - 1);
 
     let node_value_width = util::calculate_width(node_offset as u64);
-    let node_value_build_task = tokio::spawn(build_wavelet_tree_from_iter(
+    build_wavelet_tree_from_iter(
         node_value_width,
         sorted_node_value_iter,
         idmap_files.node_value_idmap_files.bits_file,
         idmap_files.node_value_idmap_files.blocks_file,
         idmap_files.node_value_idmap_files.sblocks_file,
-    ));
+    )?;
     let predicate_width = util::calculate_width(predicate_offset as u64);
-    let predicate_build_task = tokio::spawn(build_wavelet_tree_from_iter(
+    build_wavelet_tree_from_iter(
         predicate_width,
         sorted_predicate_iter,
         idmap_files.predicate_idmap_files.bits_file,
         idmap_files.predicate_idmap_files.blocks_file,
         idmap_files.predicate_idmap_files.sblocks_file,
-    ));
-
-    node_value_build_task.await??;
-    predicate_build_task.await?
+    )
 }
 
-async fn construct_idmaps_from_layers<F: 'static + FileLoad + FileStore>(
+fn construct_idmaps_from_layers<F: 'static + FileLoad + FileStore>(
     layers: &[&InternalLayer],
     idmap_files: IdMapFiles<F>,
 ) -> io::Result<()> {
@@ -218,5 +215,5 @@ async fn construct_idmaps_from_layers<F: 'static + FileLoad + FileStore>(
         &predicate_idmaps,
         idmap_files,
     )
-    .await
+    
 }

@@ -3,7 +3,7 @@
 use std::io;
 
 use bytes::Bytes;
-pub use tdb_succinct::storage::{
+pub use tdb_succinct_wasm::storage::{
     AdjacencyListFiles, AdjacencyListMaps, BitIndexFiles, BitIndexMaps, DictionaryFiles,
     DictionaryMaps, FileLoad, FileStore, SyncableFile, TypedDictionaryFiles, TypedDictionaryMaps,
 };
@@ -21,9 +21,9 @@ pub struct IdMapFiles<F: 'static + FileLoad + FileStore> {
 }
 
 impl<F: 'static + FileLoad + FileStore> IdMapFiles<F> {
-    pub async fn map_all(&self) -> io::Result<IdMapMaps> {
-        let node_value_idmap_maps = self.node_value_idmap_files.map_all_if_exists().await?;
-        let predicate_idmap_maps = self.predicate_idmap_files.map_all_if_exists().await?;
+    pub fn map_all(&self) -> io::Result<IdMapMaps> {
+        let node_value_idmap_maps = self.node_value_idmap_files.map_all_if_exists()?;
+        let predicate_idmap_maps = self.predicate_idmap_files.map_all_if_exists()?;
 
         Ok(IdMapMaps {
             node_value_idmap_maps,
@@ -115,21 +115,21 @@ pub struct BaseLayerMaps {
 }
 
 impl<F: FileLoad + FileStore> BaseLayerFiles<F> {
-    pub async fn map_all(&self) -> io::Result<BaseLayerMaps> {
-        let node_dictionary_maps = self.node_dictionary_files.map_all().await?;
-        let predicate_dictionary_maps = self.predicate_dictionary_files.map_all().await?;
-        let value_dictionary_maps = self.value_dictionary_files.map_all().await?;
+    pub fn map_all(&self) -> io::Result<BaseLayerMaps> {
+        let node_dictionary_maps = self.node_dictionary_files.map_all()?;
+        let predicate_dictionary_maps = self.predicate_dictionary_files.map_all()?;
+        let value_dictionary_maps = self.value_dictionary_files.map_all()?;
 
-        let id_map_maps = self.id_map_files.map_all().await?;
+        let id_map_maps = self.id_map_files.map_all()?;
 
-        let subjects_map = self.subjects_file.map_if_exists().await?;
-        let objects_map = self.objects_file.map_if_exists().await?;
+        let subjects_map = self.subjects_file.map_if_exists()?;
+        let objects_map = self.objects_file.map_if_exists()?;
 
-        let s_p_adjacency_list_maps = self.s_p_adjacency_list_files.map_all().await?;
-        let sp_o_adjacency_list_maps = self.sp_o_adjacency_list_files.map_all().await?;
-        let o_ps_adjacency_list_maps = self.o_ps_adjacency_list_files.map_all().await?;
+        let s_p_adjacency_list_maps = self.s_p_adjacency_list_files.map_all()?;
+        let sp_o_adjacency_list_maps = self.sp_o_adjacency_list_files.map_all()?;
+        let o_ps_adjacency_list_maps = self.o_ps_adjacency_list_files.map_all()?;
 
-        let predicate_wavelet_tree_maps = self.predicate_wavelet_tree_files.map_all().await?;
+        let predicate_wavelet_tree_maps = self.predicate_wavelet_tree_files.map_all()?;
 
         Ok(BaseLayerMaps {
             node_dictionary_maps,
@@ -199,30 +199,30 @@ pub struct ChildLayerMaps {
 }
 
 impl<F: FileLoad + FileStore + Clone> ChildLayerFiles<F> {
-    pub async fn map_all(&self) -> io::Result<ChildLayerMaps> {
-        let node_dictionary_maps = self.node_dictionary_files.map_all().await?;
-        let predicate_dictionary_maps = self.predicate_dictionary_files.map_all().await?;
-        let value_dictionary_maps = self.value_dictionary_files.map_all().await?;
+    pub fn map_all(&self) -> io::Result<ChildLayerMaps> {
+        let node_dictionary_maps = self.node_dictionary_files.map_all()?;
+        let predicate_dictionary_maps = self.predicate_dictionary_files.map_all()?;
+        let value_dictionary_maps = self.value_dictionary_files.map_all()?;
 
-        let id_map_maps = self.id_map_files.map_all().await?;
+        let id_map_maps = self.id_map_files.map_all()?;
 
-        let pos_subjects_map = self.pos_subjects_file.map().await?;
-        let neg_subjects_map = self.neg_subjects_file.map().await?;
-        let pos_objects_map = self.pos_objects_file.map().await?;
-        let neg_objects_map = self.neg_objects_file.map().await?;
+        let pos_subjects_map = self.pos_subjects_file.map()?;
+        let neg_subjects_map = self.neg_subjects_file.map()?;
+        let pos_objects_map = self.pos_objects_file.map()?;
+        let neg_objects_map = self.neg_objects_file.map()?;
 
-        let pos_s_p_adjacency_list_maps = self.pos_s_p_adjacency_list_files.map_all().await?;
-        let pos_sp_o_adjacency_list_maps = self.pos_sp_o_adjacency_list_files.map_all().await?;
-        let pos_o_ps_adjacency_list_maps = self.pos_o_ps_adjacency_list_files.map_all().await?;
+        let pos_s_p_adjacency_list_maps = self.pos_s_p_adjacency_list_files.map_all()?;
+        let pos_sp_o_adjacency_list_maps = self.pos_sp_o_adjacency_list_files.map_all()?;
+        let pos_o_ps_adjacency_list_maps = self.pos_o_ps_adjacency_list_files.map_all()?;
 
-        let neg_s_p_adjacency_list_maps = self.neg_s_p_adjacency_list_files.map_all().await?;
-        let neg_sp_o_adjacency_list_maps = self.neg_sp_o_adjacency_list_files.map_all().await?;
-        let neg_o_ps_adjacency_list_maps = self.neg_o_ps_adjacency_list_files.map_all().await?;
+        let neg_s_p_adjacency_list_maps = self.neg_s_p_adjacency_list_files.map_all()?;
+        let neg_sp_o_adjacency_list_maps = self.neg_sp_o_adjacency_list_files.map_all()?;
+        let neg_o_ps_adjacency_list_maps = self.neg_o_ps_adjacency_list_files.map_all()?;
 
         let pos_predicate_wavelet_tree_maps =
-            self.pos_predicate_wavelet_tree_files.map_all().await?;
+            self.pos_predicate_wavelet_tree_files.map_all()?;
         let neg_predicate_wavelet_tree_maps =
-            self.neg_predicate_wavelet_tree_files.map_all().await?;
+            self.neg_predicate_wavelet_tree_files.map_all()?;
 
         Ok(ChildLayerMaps {
             node_dictionary_maps,

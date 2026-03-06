@@ -8,7 +8,7 @@ mod subject_iterator;
 
 use super::id_map::*;
 use super::layer::*;
-use tdb_succinct::*;
+use tdb_succinct_wasm::*;
 
 use std::collections::HashSet;
 use std::convert::TryInto;
@@ -1112,41 +1112,41 @@ mod tests {
     }
 
     use crate::layer::base::base_tests::*;
-    #[tokio::test]
-    async fn base_layer_with_gaps_addition_count() {
+    #[test]
+    fn base_layer_with_gaps_addition_count() {
         let files = base_layer_files();
 
         let nodes = vec!["aaaaa", "baa", "bbbbb", "ccccc", "mooo"];
         let predicates = vec!["abcde", "fghij", "klmno", "lll"];
         let values = vec!["chicken", "cow", "dog", "pig", "zebra"];
 
-        let mut builder = BaseLayerFileBuilder::from_files(&files).await.unwrap();
+        let mut builder = BaseLayerFileBuilder::from_files(&files).unwrap();
         builder.add_nodes(nodes.into_iter().map(|s| s.to_string()));
         builder.add_predicates(predicates.into_iter().map(|s| s.to_string()));
         builder.add_values(values.into_iter().map(|s| String::make_entry(&s)));
-        let mut builder = builder.into_phase2().await.unwrap();
-        builder.add_triple(3, 3, 3).await.unwrap();
-        builder.finalize().await.unwrap();
+        let mut builder = builder.into_phase2().unwrap();
+        builder.add_triple(3, 3, 3).unwrap();
+        builder.finalize().unwrap();
 
         let layer = BaseLayer::load_from_files([1, 2, 3, 4, 5], &files)
-            .await
+            
             .unwrap();
 
         assert_eq!(1, layer.internal_triple_layer_addition_count());
     }
 
-    #[tokio::test]
-    async fn object_is_node_in_base_layer() {
+    #[test]
+    fn object_is_node_in_base_layer() {
         let dir = tempdir().unwrap();
         let store = open_directory_store(dir.path());
-        let builder = store.create_base_layer().await.unwrap();
+        let builder = store.create_base_layer().unwrap();
         builder
             .add_value_triple(ValueTriple::new_node("foo", "links_to", "bar"))
             .unwrap();
         builder
             .add_value_triple(ValueTriple::new_string_value("foo", "links_to_data", "wow"))
             .unwrap();
-        let layer = builder.commit().await.unwrap();
+        let layer = builder.commit().unwrap();
         assert_eq!(Some(true), layer.id_object_is_node(1));
         assert_eq!(Some(true), layer.id_object_is_node(2));
         assert_eq!(Some(false), layer.id_object_is_node(3));

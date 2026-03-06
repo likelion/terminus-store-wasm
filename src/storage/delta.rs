@@ -3,9 +3,9 @@ use std::io;
 use crate::layer::builder::{build_indexes, TripleFileBuilder};
 use crate::layer::*;
 use crate::storage::*;
-use tdb_succinct::*;
+use tdb_succinct_wasm::*;
 
-async fn safe_upto_bound<S: LayerStore>(
+fn safe_upto_bound<S: LayerStore>(
     store: &S,
     layer: &InternalLayer,
     upto: [u32; 5],
@@ -15,7 +15,7 @@ async fn safe_upto_bound<S: LayerStore>(
     }
     let mut disk_layer_names = store
         .retrieve_layer_stack_names_upto(layer.name(), upto)
-        .await?;
+        ?;
 
     let mut l = &*layer;
     loop {
@@ -44,7 +44,7 @@ async fn safe_upto_bound<S: LayerStore>(
     }
 }
 
-async fn get_node_dicts_from_disk<S: LayerStore>(
+fn get_node_dicts_from_disk<S: LayerStore>(
     store: &S,
     name: [u32; 5],
     upto: [u32; 5],
@@ -53,7 +53,7 @@ async fn get_node_dicts_from_disk<S: LayerStore>(
     walk_backwards_from_disk_upto!(store, name, upto, current, {
         let dict = store
             .get_node_dictionary(current)
-            .await?
+            ?
             .expect("expected dictionary to exist");
         result.push(dict);
     });
@@ -63,7 +63,7 @@ async fn get_node_dicts_from_disk<S: LayerStore>(
     Ok(result)
 }
 
-async fn get_predicate_dicts_from_disk<S: LayerStore>(
+fn get_predicate_dicts_from_disk<S: LayerStore>(
     store: &S,
     name: [u32; 5],
     upto: [u32; 5],
@@ -72,7 +72,7 @@ async fn get_predicate_dicts_from_disk<S: LayerStore>(
     walk_backwards_from_disk_upto!(store, name, upto, current, {
         let dict = store
             .get_predicate_dictionary(current)
-            .await?
+            ?
             .expect("expected dictionary to exist");
         result.push(dict);
     });
@@ -82,7 +82,7 @@ async fn get_predicate_dicts_from_disk<S: LayerStore>(
     Ok(result)
 }
 
-async fn get_value_dicts_from_disk<S: LayerStore>(
+fn get_value_dicts_from_disk<S: LayerStore>(
     store: &S,
     name: [u32; 5],
     upto: [u32; 5],
@@ -91,7 +91,7 @@ async fn get_value_dicts_from_disk<S: LayerStore>(
     walk_backwards_from_disk_upto!(store, name, upto, current, {
         let dict = store
             .get_value_dictionary(current)
-            .await?
+            ?
             .expect("expected dictionary to exist");
         result.push(dict);
     });
@@ -101,7 +101,7 @@ async fn get_value_dicts_from_disk<S: LayerStore>(
     Ok(result)
 }
 
-async fn get_node_value_idmaps_from_disk<S: LayerStore>(
+fn get_node_value_idmaps_from_disk<S: LayerStore>(
     store: &S,
     name: [u32; 5],
     upto: [u32; 5],
@@ -110,7 +110,7 @@ async fn get_node_value_idmaps_from_disk<S: LayerStore>(
     walk_backwards_from_disk_upto!(store, name, upto, current, {
         let dict = store
             .get_node_value_idmap(current)
-            .await?
+            ?
             .expect("expected idmap to be retrievable");
         result.push(dict);
     });
@@ -120,7 +120,7 @@ async fn get_node_value_idmaps_from_disk<S: LayerStore>(
     Ok(result)
 }
 
-async fn get_predicate_idmaps_from_disk<S: LayerStore>(
+fn get_predicate_idmaps_from_disk<S: LayerStore>(
     store: &S,
     name: [u32; 5],
     upto: [u32; 5],
@@ -129,7 +129,7 @@ async fn get_predicate_idmaps_from_disk<S: LayerStore>(
     walk_backwards_from_disk_upto!(store, name, upto, current, {
         let dict = store
             .get_predicate_idmap(current)
-            .await?
+            ?
             .expect("expected idmap to be retrievable");
         result.push(dict);
     });
@@ -139,18 +139,18 @@ async fn get_predicate_idmaps_from_disk<S: LayerStore>(
     Ok(result)
 }
 
-async fn dictionary_rollup_upto<S: LayerStore, F: 'static + FileLoad + FileStore>(
+fn dictionary_rollup_upto<S: LayerStore, F: 'static + FileLoad + FileStore>(
     store: &S,
     layer: &InternalLayer,
     memory_upto: [u32; 5],
     upto: [u32; 5],
     files: &ChildLayerFiles<F>,
 ) -> io::Result<()> {
-    let disk_node_dicts = get_node_dicts_from_disk(store, memory_upto, upto).await?;
-    let disk_predicate_dicts = get_predicate_dicts_from_disk(store, memory_upto, upto).await?;
-    let disk_value_dicts = get_value_dicts_from_disk(store, memory_upto, upto).await?;
-    let disk_node_value_idmaps = get_node_value_idmaps_from_disk(store, memory_upto, upto).await?;
-    let disk_predicate_idmaps = get_predicate_idmaps_from_disk(store, memory_upto, upto).await?;
+    let disk_node_dicts = get_node_dicts_from_disk(store, memory_upto, upto)?;
+    let disk_predicate_dicts = get_predicate_dicts_from_disk(store, memory_upto, upto)?;
+    let disk_value_dicts = get_value_dicts_from_disk(store, memory_upto, upto)?;
+    let disk_node_value_idmaps = get_node_value_idmaps_from_disk(store, memory_upto, upto)?;
+    let disk_predicate_idmaps = get_predicate_idmaps_from_disk(store, memory_upto, upto)?;
     let node_dicts: Vec<_> = disk_node_dicts
         .into_iter()
         .chain(
@@ -199,13 +199,13 @@ async fn dictionary_rollup_upto<S: LayerStore, F: 'static + FileLoad + FileStore
         )
         .collect();
 
-    merge_string_dictionaries(node_dicts.iter(), files.node_dictionary_files.clone()).await?;
+    merge_string_dictionaries(node_dicts.iter(), files.node_dictionary_files.clone())?;
     merge_string_dictionaries(
         predicate_dicts.iter(),
         files.predicate_dictionary_files.clone(),
     )
-    .await?;
-    merge_typed_dictionaries(value_dicts.iter(), files.value_dictionary_files.clone()).await?;
+    ?;
+    merge_typed_dictionaries(value_dicts.iter(), files.value_dictionary_files.clone())?;
 
     construct_idmaps_from_structures(
         node_dicts,
@@ -215,10 +215,10 @@ async fn dictionary_rollup_upto<S: LayerStore, F: 'static + FileLoad + FileStore
         &predicate_idmaps,
         files.id_map_files.clone(),
     )
-    .await
+    
 }
 
-pub async fn dictionary_rollup<F: 'static + FileLoad + FileStore>(
+pub fn dictionary_rollup<F: 'static + FileLoad + FileStore>(
     layer: &InternalLayer,
     files: &BaseLayerFiles<F>,
 ) -> io::Result<()> {
@@ -235,14 +235,14 @@ pub async fn dictionary_rollup<F: 'static + FileLoad + FileStore>(
         .into_iter()
         .map(|l| l.value_dictionary());
 
-    merge_string_dictionaries(node_dicts, files.node_dictionary_files.clone()).await?;
-    merge_string_dictionaries(predicate_dicts, files.predicate_dictionary_files.clone()).await?;
-    merge_typed_dictionaries(value_dicts, files.value_dictionary_files.clone()).await?;
+    merge_string_dictionaries(node_dicts, files.node_dictionary_files.clone())?;
+    merge_string_dictionaries(predicate_dicts, files.predicate_dictionary_files.clone())?;
+    merge_typed_dictionaries(value_dicts, files.value_dictionary_files.clone())?;
 
-    memory_construct_idmaps(layer, files.id_map_files.clone()).await
+    memory_construct_idmaps(layer, files.id_map_files.clone())
 }
 
-async fn memory_dictionary_rollup_upto<F: 'static + FileLoad + FileStore>(
+fn memory_dictionary_rollup_upto<F: 'static + FileLoad + FileStore>(
     layer: &InternalLayer,
     upto: [u32; 5],
     files: &ChildLayerFiles<F>,
@@ -260,18 +260,18 @@ async fn memory_dictionary_rollup_upto<F: 'static + FileLoad + FileStore>(
         .into_iter()
         .map(|l| l.value_dictionary());
 
-    merge_string_dictionaries(node_dicts, files.node_dictionary_files.clone()).await?;
-    merge_string_dictionaries(predicate_dicts, files.predicate_dictionary_files.clone()).await?;
-    merge_typed_dictionaries(value_dicts, files.value_dictionary_files.clone()).await?;
+    merge_string_dictionaries(node_dicts, files.node_dictionary_files.clone())?;
+    merge_string_dictionaries(predicate_dicts, files.predicate_dictionary_files.clone())?;
+    merge_typed_dictionaries(value_dicts, files.value_dictionary_files.clone())?;
 
-    memory_construct_idmaps_upto(layer, upto, files.id_map_files.clone()).await
+    memory_construct_idmaps_upto(layer, upto, files.id_map_files.clone())
 }
 
-pub async fn delta_rollup<F: 'static + FileLoad + FileStore>(
+pub fn delta_rollup<F: 'static + FileLoad + FileStore>(
     layer: &InternalLayer,
     files: BaseLayerFiles<F>,
 ) -> io::Result<()> {
-    dictionary_rollup(layer, &files).await?;
+    dictionary_rollup(layer, &files)?;
 
     let counts = layer.all_counts();
 
@@ -283,10 +283,10 @@ pub async fn delta_rollup<F: 'static + FileLoad + FileStore>(
         counts.value_count,
         None,
     )
-    .await?;
+    ?;
 
-    builder.add_id_triples(layer.triples()).await?;
-    builder.finalize().await?;
+    builder.add_id_triples(layer.triples())?;
+    builder.finalize()?;
 
     build_indexes(
         files.s_p_adjacency_list_files.clone(),
@@ -295,17 +295,17 @@ pub async fn delta_rollup<F: 'static + FileLoad + FileStore>(
         None,
         files.predicate_wavelet_tree_files.clone(),
     )
-    .await
+    
 }
 
-pub async fn imprecise_delta_rollup_upto<S: LayerStore, F: 'static + FileLoad + FileStore>(
+pub fn imprecise_delta_rollup_upto<S: LayerStore, F: 'static + FileLoad + FileStore>(
     store: &S,
     layer: &InternalLayer,
     upto: [u32; 5],
     files: ChildLayerFiles<F>,
 ) -> io::Result<()> {
-    let bound = safe_upto_bound(store, layer, upto).await?;
-    memory_dictionary_rollup_upto(layer, bound, &files).await?;
+    let bound = safe_upto_bound(store, layer, upto)?;
+    memory_dictionary_rollup_upto(layer, bound, &files)?;
 
     let counts = layer.all_counts();
 
@@ -317,7 +317,7 @@ pub async fn imprecise_delta_rollup_upto<S: LayerStore, F: 'static + FileLoad + 
         counts.value_count,
         Some(files.pos_subjects_file),
     )
-    .await?;
+    ?;
 
     let mut neg_builder = TripleFileBuilder::new(
         files.neg_s_p_adjacency_list_files.clone(),
@@ -327,7 +327,7 @@ pub async fn imprecise_delta_rollup_upto<S: LayerStore, F: 'static + FileLoad + 
         counts.value_count,
         Some(files.neg_subjects_file),
     )
-    .await?;
+    ?;
 
     let additions = InternalTripleStackIterator::from_layer_stack(layer, bound)
         .expect("bound not found")
@@ -339,11 +339,11 @@ pub async fn imprecise_delta_rollup_upto<S: LayerStore, F: 'static + FileLoad + 
         .filter(|(sort, _)| *sort == TripleChange::Removal)
         .map(|(_, t)| t);
 
-    pos_builder.add_id_triples(additions).await?;
-    pos_builder.finalize().await?;
+    pos_builder.add_id_triples(additions)?;
+    pos_builder.finalize()?;
 
-    neg_builder.add_id_triples(removals).await?;
-    neg_builder.finalize().await?;
+    neg_builder.add_id_triples(removals)?;
+    neg_builder.finalize()?;
 
     build_indexes(
         files.pos_s_p_adjacency_list_files.clone(),
@@ -352,7 +352,7 @@ pub async fn imprecise_delta_rollup_upto<S: LayerStore, F: 'static + FileLoad + 
         Some(files.pos_objects_file.clone()),
         files.pos_predicate_wavelet_tree_files.clone(),
     )
-    .await?;
+    ?;
 
     build_indexes(
         files.neg_s_p_adjacency_list_files.clone(),
@@ -361,17 +361,17 @@ pub async fn imprecise_delta_rollup_upto<S: LayerStore, F: 'static + FileLoad + 
         Some(files.neg_objects_file.clone()),
         files.neg_predicate_wavelet_tree_files.clone(),
     )
-    .await
+    
 }
 
-pub async fn delta_rollup_upto<S: LayerStore, F: 'static + FileLoad + FileStore>(
+pub fn delta_rollup_upto<S: LayerStore, F: 'static + FileLoad + FileStore>(
     store: &S,
     layer: &InternalLayer,
     upto: [u32; 5],
     files: ChildLayerFiles<F>,
 ) -> io::Result<()> {
-    let bound = safe_upto_bound(store, layer, upto).await?;
-    dictionary_rollup_upto(store, layer, bound, upto, &files).await?;
+    let bound = safe_upto_bound(store, layer, upto)?;
+    dictionary_rollup_upto(store, layer, bound, upto, &files)?;
 
     let counts = layer.all_counts();
 
@@ -383,7 +383,7 @@ pub async fn delta_rollup_upto<S: LayerStore, F: 'static + FileLoad + FileStore>
         counts.value_count,
         Some(files.pos_subjects_file),
     )
-    .await?;
+    ?;
 
     let mut neg_builder = TripleFileBuilder::new(
         files.neg_s_p_adjacency_list_files.clone(),
@@ -393,9 +393,9 @@ pub async fn delta_rollup_upto<S: LayerStore, F: 'static + FileLoad + FileStore>
         counts.value_count,
         Some(files.neg_subjects_file),
     )
-    .await?;
+    ?;
 
-    let disk_changes = store.layer_changes_upto(bound, upto).await?;
+    let disk_changes = store.layer_changes_upto(bound, upto)?;
     let memory_changes =
         InternalTripleStackIterator::from_layer_stack(layer, bound).expect("upto not found");
     let changes = InternalTripleStackIterator::merge(vec![disk_changes, memory_changes]);
@@ -408,11 +408,11 @@ pub async fn delta_rollup_upto<S: LayerStore, F: 'static + FileLoad + FileStore>
         .filter(|(sort, _)| *sort == TripleChange::Removal)
         .map(|(_, t)| t);
 
-    pos_builder.add_id_triples(additions).await?;
-    pos_builder.finalize().await?;
+    pos_builder.add_id_triples(additions)?;
+    pos_builder.finalize()?;
 
-    neg_builder.add_id_triples(removals).await?;
-    neg_builder.finalize().await?;
+    neg_builder.add_id_triples(removals)?;
+    neg_builder.finalize()?;
 
     build_indexes(
         files.pos_s_p_adjacency_list_files.clone(),
@@ -421,7 +421,7 @@ pub async fn delta_rollup_upto<S: LayerStore, F: 'static + FileLoad + FileStore>
         Some(files.pos_objects_file.clone()),
         files.pos_predicate_wavelet_tree_files.clone(),
     )
-    .await?;
+    ?;
 
     build_indexes(
         files.neg_s_p_adjacency_list_files.clone(),
@@ -430,7 +430,7 @@ pub async fn delta_rollup_upto<S: LayerStore, F: 'static + FileLoad + FileStore>
         Some(files.neg_objects_file.clone()),
         files.neg_predicate_wavelet_tree_files.clone(),
     )
-    .await
+    
 }
 
 #[cfg(test)]
@@ -438,53 +438,53 @@ mod tests {
     use super::*;
     use crate::storage::memory::*;
     use std::sync::Arc;
-    async fn build_three_layers<S: LayerStore>(
+    fn build_three_layers<S: LayerStore>(
         store: &S,
     ) -> io::Result<(Arc<InternalLayer>, Arc<InternalLayer>, Arc<InternalLayer>)> {
-        let mut builder = store.create_base_layer().await?;
+        let mut builder = store.create_base_layer()?;
         let base_name = builder.name();
         builder.add_value_triple(ValueTriple::new_string_value("cow", "says", "moo"));
         builder.add_value_triple(ValueTriple::new_string_value("duck", "says", "quack"));
         builder.add_value_triple(ValueTriple::new_node("cow", "likes", "duck"));
         builder.add_value_triple(ValueTriple::new_node("duck", "hates", "cow"));
 
-        builder.commit_boxed().await?;
-        let base_layer = store.get_layer(base_name).await?.unwrap();
+        builder.commit_boxed()?;
+        let base_layer = store.get_layer(base_name)?.unwrap();
 
-        builder = store.create_child_layer(base_name).await?;
+        builder = store.create_child_layer(base_name)?;
         let child1_name = builder.name();
         builder.remove_value_triple(ValueTriple::new_node("duck", "hates", "cow"));
         builder.add_value_triple(ValueTriple::new_node("duck", "likes", "cow"));
         builder.add_value_triple(ValueTriple::new_string_value("horse", "says", "neigh"));
         builder.add_value_triple(ValueTriple::new_node("pig", "likes", "pig"));
 
-        builder.commit_boxed().await?;
-        let child1_layer = store.get_layer(child1_name).await?.unwrap();
+        builder.commit_boxed()?;
+        let child1_layer = store.get_layer(child1_name)?.unwrap();
 
-        builder = store.create_child_layer(child1_name).await?;
+        builder = store.create_child_layer(child1_name)?;
         let child2_name = builder.name();
         builder.remove_value_triple(ValueTriple::new_node("pig", "likes", "pig"));
         builder.add_value_triple(ValueTriple::new_string_value("pig", "says", "oink"));
         builder.add_value_triple(ValueTriple::new_string_value("sheep", "says", "baah"));
         builder.add_value_triple(ValueTriple::new_string_value("pig", "likes", "sheep"));
-        builder.commit_boxed().await?;
+        builder.commit_boxed()?;
 
-        let child2_layer = store.get_layer(child2_name).await?.unwrap();
+        let child2_layer = store.get_layer(child2_name)?.unwrap();
 
         Ok((base_layer, child1_layer, child2_layer))
     }
 
-    #[tokio::test]
-    async fn rollup_three_layers() {
+    #[test]
+    fn rollup_three_layers() {
         let store = MemoryLayerStore::new();
-        let (_, _, layer) = build_three_layers(&store).await.unwrap();
+        let (_, _, layer) = build_three_layers(&store).unwrap();
 
         let delta_files = base_layer_memory_files();
-        delta_rollup(&layer, delta_files.clone()).await.unwrap();
+        delta_rollup(&layer, delta_files.clone()).unwrap();
 
         let delta_layer: Arc<InternalLayer> = Arc::new(
             BaseLayer::load_from_files([0, 0, 0, 0, 4], &delta_files)
-                .await
+                
                 .unwrap()
                 .into(),
         );
@@ -507,20 +507,20 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    async fn rollup_two_of_three_layers() {
+    #[test]
+    fn rollup_two_of_three_layers() {
         let store = MemoryLayerStore::new();
-        let (base_layer, _, child_layer) = build_three_layers(&store).await.unwrap();
+        let (base_layer, _, child_layer) = build_three_layers(&store).unwrap();
         let base_name = Layer::name(&*base_layer);
 
         let delta_files = child_layer_memory_files();
         delta_rollup_upto(&store, &child_layer, base_name, delta_files.clone())
-            .await
+            
             .unwrap();
 
         let delta_layer: Arc<InternalLayer> = Arc::new(
             ChildLayer::load_from_files([0, 0, 0, 0, 4], base_layer, &delta_files)
-                .await
+                
                 .unwrap()
                 .into(),
         );
@@ -554,10 +554,10 @@ mod tests {
         assert_eq!(change_expected, change_actual);
     }
 
-    #[tokio::test]
-    async fn rollup_twice() {
+    #[test]
+    fn rollup_twice() {
         let store = MemoryLayerStore::new();
-        let (base_layer, _, child_layer) = build_three_layers(&store).await.unwrap();
+        let (base_layer, _, child_layer) = build_three_layers(&store).unwrap();
 
         let delta1_files = child_layer_memory_files();
         delta_rollup_upto(
@@ -566,24 +566,24 @@ mod tests {
             Layer::name(&*base_layer),
             delta1_files.clone(),
         )
-        .await
+        
         .unwrap();
 
         let delta_layer1: Arc<InternalLayer> = Arc::new(
             ChildLayer::load_from_files([0, 0, 0, 0, 4], base_layer, &delta1_files)
-                .await
+                
                 .unwrap()
                 .into(),
         );
 
         let delta2_files = base_layer_memory_files();
         delta_rollup(&delta_layer1, delta2_files.clone())
-            .await
+            
             .unwrap();
 
         let delta_layer2: Arc<InternalLayer> = Arc::new(
             BaseLayer::load_from_files([0, 0, 0, 0, 5], &delta2_files)
-                .await
+                
                 .unwrap()
                 .into(),
         );
@@ -606,48 +606,48 @@ mod tests {
         }
     }
 
-    async fn create_layer_stack<S: LayerStore>(store: &S) -> Vec<[u32; 5]> {
-        let mut builder = store.create_base_layer().await.unwrap();
+    fn create_layer_stack<S: LayerStore>(store: &S) -> Vec<[u32; 5]> {
+        let mut builder = store.create_base_layer().unwrap();
         let base_name = builder.name();
         builder.add_value_triple(ValueTriple::new_string_value("a", "a", "a"));
         builder.add_value_triple(ValueTriple::new_string_value("a", "b", "c"));
-        builder.commit_boxed().await.unwrap();
+        builder.commit_boxed().unwrap();
 
-        let mut builder = store.create_child_layer(base_name).await.unwrap();
+        let mut builder = store.create_child_layer(base_name).unwrap();
         let child1_name = builder.name();
         builder.add_value_triple(ValueTriple::new_string_value("a", "a", "b"));
         builder.add_value_triple(ValueTriple::new_string_value("a", "b", "a"));
         builder.add_value_triple(ValueTriple::new_string_value("b", "a", "a"));
         builder.add_value_triple(ValueTriple::new_string_value("d", "d", "d"));
         builder.remove_value_triple(ValueTriple::new_string_value("a", "a", "a"));
-        builder.commit_boxed().await.unwrap();
+        builder.commit_boxed().unwrap();
 
-        let mut builder = store.create_child_layer(child1_name).await.unwrap();
+        let mut builder = store.create_child_layer(child1_name).unwrap();
         builder.add_value_triple(ValueTriple::new_string_value("a", "b", "b"));
         builder.add_value_triple(ValueTriple::new_string_value("b", "a", "b"));
         builder.add_value_triple(ValueTriple::new_string_value("e", "e", "e"));
         builder.remove_value_triple(ValueTriple::new_string_value("a", "a", "b"));
         let child2_name = builder.name();
-        builder.commit_boxed().await.unwrap();
+        builder.commit_boxed().unwrap();
 
-        let mut builder = store.create_child_layer(child2_name).await.unwrap();
+        let mut builder = store.create_child_layer(child2_name).unwrap();
         builder.add_value_triple(ValueTriple::new_string_value("a", "a", "b"));
         builder.add_value_triple(ValueTriple::new_string_value("b", "b", "a"));
         builder.add_value_triple(ValueTriple::new_string_value("f", "f", "f"));
         let child3_name = builder.name();
-        builder.commit_boxed().await.unwrap();
+        builder.commit_boxed().unwrap();
 
-        let mut builder = store.create_child_layer(child3_name).await.unwrap();
+        let mut builder = store.create_child_layer(child3_name).unwrap();
         builder.add_value_triple(ValueTriple::new_string_value("b", "b", "c"));
         builder.add_value_triple(ValueTriple::new_string_value("g", "g", "g"));
         let child4_name = builder.name();
-        builder.commit_boxed().await.unwrap();
+        builder.commit_boxed().unwrap();
 
-        let mut builder = store.create_child_layer(child4_name).await.unwrap();
+        let mut builder = store.create_child_layer(child4_name).unwrap();
         builder.add_value_triple(ValueTriple::new_string_value("c", "a", "b"));
         builder.add_value_triple(ValueTriple::new_string_value("h", "h", "h"));
         let child5_name = builder.name();
-        builder.commit_boxed().await.unwrap();
+        builder.commit_boxed().unwrap();
 
         vec![
             base_name,
@@ -659,23 +659,23 @@ mod tests {
         ]
     }
 
-    #[tokio::test]
-    async fn imprecise_rollup_is_equivalent_to_normal_rollup_without_intermittent_rollups() {
+    #[test]
+    fn imprecise_rollup_is_equivalent_to_normal_rollup_without_intermittent_rollups() {
         let store = Arc::new(MemoryLayerStore::new());
 
-        let stack = create_layer_stack(&*store).await;
+        let stack = create_layer_stack(&*store);
 
-        let layer = store.get_layer(stack[5]).await.unwrap().unwrap();
+        let layer = store.get_layer(stack[5]).unwrap().unwrap();
 
         store
             .clone()
             .rollup_upto(layer.clone(), stack[2])
-            .await
+            
             .unwrap();
         let first = Layer::name(
             store
                 .get_layer(stack[5])
-                .await
+                
                 .unwrap()
                 .unwrap()
                 .immediate_parent()
@@ -685,12 +685,12 @@ mod tests {
         store
             .clone()
             .imprecise_rollup_upto(layer, stack[2])
-            .await
+            
             .unwrap();
         let second = Layer::name(
             store
                 .get_layer(stack[5])
-                .await
+                
                 .unwrap()
                 .unwrap()
                 .immediate_parent()
@@ -701,25 +701,25 @@ mod tests {
         assert_eq!(stack[2], first);
     }
 
-    #[tokio::test]
-    async fn imprecise_rollup_is_different_from_normal_rollup_with_intermittent_rollups_1() {
+    #[test]
+    fn imprecise_rollup_is_different_from_normal_rollup_with_intermittent_rollups_1() {
         let store = Arc::new(MemoryLayerStore::new());
 
-        let stack = create_layer_stack(&*store).await;
-        let layer = store.get_layer(stack[3]).await.unwrap().unwrap();
-        store.clone().rollup_upto(layer, stack[0]).await.unwrap();
+        let stack = create_layer_stack(&*store);
+        let layer = store.get_layer(stack[3]).unwrap().unwrap();
+        store.clone().rollup_upto(layer, stack[0]).unwrap();
 
-        let layer = store.get_layer(stack[5]).await.unwrap().unwrap();
+        let layer = store.get_layer(stack[5]).unwrap().unwrap();
 
         store
             .clone()
             .rollup_upto(layer.clone(), stack[2])
-            .await
+            
             .unwrap();
         let first = Layer::name(
             store
                 .get_layer(stack[5])
-                .await
+                
                 .unwrap()
                 .unwrap()
                 .immediate_parent()
@@ -729,12 +729,12 @@ mod tests {
         store
             .clone()
             .imprecise_rollup_upto(layer, stack[2])
-            .await
+            
             .unwrap();
         let second = Layer::name(
             store
                 .get_layer(stack[5])
-                .await
+                
                 .unwrap()
                 .unwrap()
                 .immediate_parent()
@@ -744,25 +744,25 @@ mod tests {
         assert_eq!(first, second);
     }
 
-    #[tokio::test]
-    async fn imprecise_rollup_is_different_from_normal_rollup_with_intermittent_rollups_2() {
+    #[test]
+    fn imprecise_rollup_is_different_from_normal_rollup_with_intermittent_rollups_2() {
         let store = Arc::new(MemoryLayerStore::new());
 
-        let stack = create_layer_stack(&*store).await;
-        let layer = store.get_layer(stack[3]).await.unwrap().unwrap();
-        store.clone().rollup(layer).await.unwrap();
+        let stack = create_layer_stack(&*store);
+        let layer = store.get_layer(stack[3]).unwrap().unwrap();
+        store.clone().rollup(layer).unwrap();
 
-        let layer = store.get_layer(stack[5]).await.unwrap().unwrap();
+        let layer = store.get_layer(stack[5]).unwrap().unwrap();
 
         store
             .clone()
             .rollup_upto(layer.clone(), stack[2])
-            .await
+            
             .unwrap();
         let first = Layer::name(
             store
                 .get_layer(stack[5])
-                .await
+                
                 .unwrap()
                 .unwrap()
                 .immediate_parent()
@@ -772,12 +772,12 @@ mod tests {
         store
             .clone()
             .imprecise_rollup_upto(layer, stack[2])
-            .await
+            
             .unwrap();
         let second = Layer::name(
             store
                 .get_layer(stack[5])
-                .await
+                
                 .unwrap()
                 .unwrap()
                 .immediate_parent()
@@ -787,15 +787,15 @@ mod tests {
         assert_eq!(first, second);
     }
 
-    #[tokio::test]
-    async fn rollup_that_loads_from_disk_has_expected_contents() {
+    #[test]
+    fn rollup_that_loads_from_disk_has_expected_contents() {
         let store = Arc::new(MemoryLayerStore::new());
 
-        let stack = create_layer_stack(&*store).await;
-        let layer = store.get_layer(stack[3]).await.unwrap().unwrap();
-        store.clone().rollup_upto(layer, stack[0]).await.unwrap();
+        let stack = create_layer_stack(&*store);
+        let layer = store.get_layer(stack[3]).unwrap().unwrap();
+        store.clone().rollup_upto(layer, stack[0]).unwrap();
 
-        let layer = store.get_layer(stack[5]).await.unwrap().unwrap();
+        let layer = store.get_layer(stack[5]).unwrap().unwrap();
         let original_triples: Vec<_> = layer
             .triples()
             .map(|t| layer.id_triple_to_string(&t))
@@ -805,9 +805,9 @@ mod tests {
         store
             .clone()
             .rollup_upto(layer.clone(), stack[2])
-            .await
+            
             .unwrap();
-        let rollup = store.get_layer(stack[5]).await.unwrap().unwrap();
+        let rollup = store.get_layer(stack[5]).unwrap().unwrap();
 
         let new_triples: Vec<_> = rollup
             .triples()

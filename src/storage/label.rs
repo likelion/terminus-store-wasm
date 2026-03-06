@@ -1,6 +1,5 @@
 use std::io;
 
-use async_trait::async_trait;
 
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct Label {
@@ -34,23 +33,22 @@ impl Label {
     }
 }
 
-#[async_trait]
 pub trait LabelStore: Send + Sync {
-    async fn labels(&self) -> io::Result<Vec<Label>>;
-    async fn create_label(&self, name: &str) -> io::Result<Label>;
-    async fn get_label(&self, name: &str) -> io::Result<Option<Label>>;
-    async fn set_label_option(
+    fn labels(&self) -> io::Result<Vec<Label>>;
+    fn create_label(&self, name: &str) -> io::Result<Label>;
+    fn get_label(&self, name: &str) -> io::Result<Option<Label>>;
+    fn set_label_option(
         &self,
         label: &Label,
         layer: Option<[u32; 5]>,
     ) -> io::Result<Option<Label>>;
-    async fn delete_label(&self, name: &str) -> io::Result<bool>;
+    fn delete_label(&self, name: &str) -> io::Result<bool>;
 
-    async fn set_label(&self, label: &Label, layer: [u32; 5]) -> io::Result<Option<Label>> {
-        self.set_label_option(label, Some(layer)).await
+    fn set_label(&self, label: &Label, layer: [u32; 5]) -> io::Result<Option<Label>> {
+        self.set_label_option(label, Some(layer))
     }
 
-    async fn clear_label(&self, label: &Label) -> io::Result<Option<Label>> {
-        self.set_label_option(label, None).await
+    fn clear_label(&self, label: &Label) -> io::Result<Option<Label>> {
+        self.set_label_option(label, None)
     }
 }

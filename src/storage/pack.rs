@@ -1,10 +1,9 @@
 use std::collections::{HashMap, HashSet};
 use std::fmt::Display;
-use std::io::{self, Read};
+use std::io::{self, Read, Write};
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use async_trait::async_trait;
 
 use super::cache::*;
 use super::consts::*;
@@ -15,12 +14,10 @@ use flate2::read::GzDecoder;
 use flate2::write::GzEncoder;
 use flate2::Compression;
 use tar::*;
-use tokio::io::AsyncWriteExt;
 
-#[async_trait]
 pub trait Packable {
     /// Export the given layers by creating a pack, a Vec<u8> that can later be used with `import_layers` on a different store.
-    async fn export_layers(
+    fn export_layers(
         &self,
         layer_ids: Box<dyn Iterator<Item = [u32; 5]> + Send>,
     ) -> io::Result<Vec<u8>>;
@@ -30,16 +27,15 @@ pub trait Packable {
     /// After this operation, the specified layers will be retrievable
     /// from this store, provided they existed in the pack. specified
     /// layers that are not in the pack are silently ignored.
-    async fn import_layers(
+    fn import_layers(
         &self,
         pack: &[u8],
         layer_ids: Box<dyn Iterator<Item = [u32; 5]> + Send>,
     ) -> io::Result<()>;
 }
 
-#[async_trait]
 impl<T: PersistentLayerStore> Packable for T {
-    async fn export_layers(
+    fn export_layers(
         &self,
         layer_ids: Box<dyn Iterator<Item = [u32; 5]> + Send>,
     ) -> io::Result<Vec<u8>> {
@@ -52,7 +48,7 @@ impl<T: PersistentLayerStore> Packable for T {
         {
             let mut tar = tar::Builder::new(&mut enc);
             for id in layer_ids {
-                tar_append_layer(&mut tar, self, id, mtime).await?;
+                tar_append_layer(&mut tar, self, id, mtime)?;
             }
             tar.finish().unwrap();
         }
@@ -60,27 +56,31 @@ impl<T: PersistentLayerStore> Packable for T {
         Ok(enc.finish().unwrap())
     }
 
-    async fn import_layers(
+    fn import_layers(
         &self,
         pack: &[u8],
         layer_ids: Box<dyn Iterator<Item = [u32; 5]> + Send>,
     ) -> io::Result<()> {
         let mut layer_id_set = HashSet::new();
+        let mut existing_layers = HashSet::new();
         for id in layer_ids {
-            layer_id_set.insert(name_to_string(id));
-            self.create_named_directory(id).await?;
+            let id_str = name_to_string(id);
+            // Skip layers that already exist (Requirement 17.3)
+            if self.directory_exists(id)? {
+                existing_layers.insert(id_str.clone());
+            } else {
+                self.create_named_directory(id)?;
+            }
+            layer_id_set.insert(id_str);
         }
 
-        let handle = tokio::runtime::Handle::current();
-        tokio::task::block_in_place(|| {
+        let _handle_placeholder = (); // tokio runtime no longer needed
+        {
             let cursor = io::Cursor::new(pack);
             let tar = GzDecoder::new(cursor);
             let mut archive = Archive::new(tar);
 
             // TODO we actually need to validate that these layers, when extracted, will make for a valid store.
-            // In terminus-server we are currently already doing this validation. Due to time constraints, we're not implementing it here.
-            //
-            // This should definitely be done in the future though, to make this part of the library independently usable in a safe manner.
             for e in archive.entries()? {
                 let mut entry = e?;
                 let path = entry.path()?;
@@ -98,7 +98,7 @@ impl<T: PersistentLayerStore> Packable for T {
                 // check if entry is prefixed with a layer id we are interested in
                 let layer_id = path.iter().next().and_then(|p| p.to_str()).unwrap_or("");
 
-                if layer_id_set.contains(layer_id) {
+                if layer_id_set.contains(layer_id) && !existing_layers.contains(layer_id) {
                     // this conversion should always work cause we are
                     // only able to match things that went through the
                     // conversion in the opposite direction.
@@ -112,29 +112,30 @@ impl<T: PersistentLayerStore> Packable for T {
                     let mut content = Vec::with_capacity(header.size()? as usize);
                     entry.read_to_end(&mut content)?;
 
-                    handle.block_on(async move {
-                        let file = self.get_file(layer_id_arr, &file_name).await?;
-                        let mut writer = file.open_write().await?;
-                        writer.write_all(&content).await?;
-                        writer.flush().await?;
-                        writer.sync_all().await?;
-
-                        Ok::<_, io::Error>(())
-                    })?;
+                    {
+                        let file = self.get_file(layer_id_arr, &file_name)?;
+                        let mut writer = file.open_write()?;
+                        writer.write_all(&content)?;
+                        writer.flush()?;
+                        writer.sync_all()?;
+                    };
                 }
             }
 
             for layer_id in layer_id_set {
+                if existing_layers.contains(&layer_id) {
+                    continue; // Skip finalization for already-existing layers
+                }
                 let layer_id_arr = string_to_name(&layer_id).unwrap();
-                handle.block_on(self.finalize_layer(layer_id_arr))?;
+                self.finalize_layer(layer_id_arr)?;
             }
 
             Ok(())
-        })
+        }
     }
 }
 
-async fn tar_append_file<S: PersistentLayerStore, W: io::Write>(
+fn tar_append_file<S: PersistentLayerStore, W: io::Write>(
     store: &S,
     tar: &mut tar::Builder<W>,
     layer: [u32; 5],
@@ -142,18 +143,18 @@ async fn tar_append_file<S: PersistentLayerStore, W: io::Write>(
     file_name: &str,
     mtime: u64,
 ) -> io::Result<()> {
-    if store.file_exists(layer, file_name).await? {
-        let file = store.get_file(layer, file_name).await?;
-        let contents = file.map().await?;
+    if store.file_exists(layer, file_name)? {
+        let file = store.get_file(layer, file_name)?;
+        let contents = file.map()?;
         let cursor = io::Cursor::new(&contents);
 
         let path = layer_path.join(file_name);
 
         let mut header = Header::new_gnu();
         header.set_mode(0o644);
-        header.set_size(file.size().await? as u64);
+        header.set_size(file.size()? as u64);
         header.set_mtime(mtime);
-        tokio::task::block_in_place(|| tar.append_data(&mut header, path, cursor).unwrap());
+        tar.append_data(&mut header, path, cursor).unwrap();
 
         Ok(())
     } else {
@@ -164,7 +165,7 @@ async fn tar_append_file<S: PersistentLayerStore, W: io::Write>(
     }
 }
 
-async fn tar_append_file_if_exists<S: PersistentLayerStore, W: io::Write>(
+fn tar_append_file_if_exists<S: PersistentLayerStore, W: io::Write>(
     store: &S,
     tar: &mut tar::Builder<W>,
     layer: [u32; 5],
@@ -172,24 +173,24 @@ async fn tar_append_file_if_exists<S: PersistentLayerStore, W: io::Write>(
     file_name: &str,
     mtime: u64,
 ) -> io::Result<()> {
-    if store.file_exists(layer, file_name).await? {
-        let file = store.get_file(layer, file_name).await?;
-        let contents = file.map().await?;
+    if store.file_exists(layer, file_name)? {
+        let file = store.get_file(layer, file_name)?;
+        let contents = file.map()?;
         let cursor = io::Cursor::new(&contents);
 
         let path = layer_path.join(file_name);
 
         let mut header = Header::new_gnu();
         header.set_mode(0o644);
-        header.set_size(file.size().await? as u64);
+        header.set_size(file.size()? as u64);
         header.set_mtime(mtime);
-        tokio::task::block_in_place(|| tar.append_data(&mut header, path, cursor).unwrap());
+        tar.append_data(&mut header, path, cursor).unwrap();
     }
 
     Ok(())
 }
 
-async fn tar_append_layer<W: io::Write, S: PersistentLayerStore>(
+fn tar_append_layer<W: io::Write, S: PersistentLayerStore>(
     tar: &mut tar::Builder<W>,
     store: &S,
     layer: [u32; 5],
@@ -203,36 +204,34 @@ async fn tar_append_layer<W: io::Write, S: PersistentLayerStore>(
     let layer_name = name_to_string(layer);
     let mut path = PathBuf::new();
     path.push(layer_name);
-    tokio::task::block_in_place(|| {
-        tar.append_data(&mut header, &path, std::io::empty())
-            .unwrap()
-    });
+    tar.append_data(&mut header, &path, std::io::empty())
+        .unwrap();
 
     for f in &SHARED_REQUIRED_FILES {
-        tar_append_file(store, tar, layer, &path, f, mtime).await?;
+        tar_append_file(store, tar, layer, &path, f, mtime)?;
     }
     for f in &SHARED_OPTIONAL_FILES {
         if f == &FILENAMES.rollup {
             // skip the rollup file. It will not be resolvable remotely.
             continue;
         }
-        tar_append_file_if_exists(store, tar, layer, &path, f, mtime).await?;
+        tar_append_file_if_exists(store, tar, layer, &path, f, mtime)?;
     }
-    if store.file_exists(layer, FILENAMES.parent).await? {
+    if store.file_exists(layer, FILENAMES.parent)? {
         // this is a child layer
         for f in &CHILD_LAYER_REQUIRED_FILES {
-            tar_append_file(store, tar, layer, &path, f, mtime).await?;
+            tar_append_file(store, tar, layer, &path, f, mtime)?;
         }
         for f in &CHILD_LAYER_OPTIONAL_FILES {
-            tar_append_file_if_exists(store, tar, layer, &path, f, mtime).await?;
+            tar_append_file_if_exists(store, tar, layer, &path, f, mtime)?;
         }
     } else {
         // this is a base layer
         for f in &BASE_LAYER_REQUIRED_FILES {
-            tar_append_file(store, tar, layer, &path, f, mtime).await?;
+            tar_append_file(store, tar, layer, &path, f, mtime)?;
         }
         for f in &BASE_LAYER_OPTIONAL_FILES {
-            tar_append_file_if_exists(store, tar, layer, &path, f, mtime).await?;
+            tar_append_file_if_exists(store, tar, layer, &path, f, mtime)?;
         }
     }
 
@@ -304,21 +303,20 @@ pub fn pack_layer_parents<R: io::Read>(
     Ok(result_map)
 }
 
-#[async_trait]
 impl Packable for CachedLayerStore {
-    async fn export_layers(
+    fn export_layers(
         &self,
         layer_ids: Box<dyn Iterator<Item = [u32; 5]> + Send>,
     ) -> io::Result<Vec<u8>> {
-        self.inner.export_layers(layer_ids).await
+        self.inner.export_layers(layer_ids)
     }
 
-    async fn import_layers(
+    fn import_layers(
         &self,
         pack: &[u8],
         layer_ids: Box<dyn Iterator<Item = [u32; 5]> + Send>,
     ) -> io::Result<()> {
-        self.inner.import_layers(pack, layer_ids).await
+        self.inner.import_layers(pack, layer_ids)
     }
 }
 
@@ -328,46 +326,68 @@ mod tests {
     use crate::layer::*;
     use crate::storage::directory::*;
     use std::sync::Arc;
-    use tempfile::tempdir;
 
-    #[tokio::test(flavor = "multi_thread")]
-    async fn export_import_layer_with_rollup() {
+    /// Simple temp directory helper that cleans up on drop (replaces tempfile::tempdir)
+    struct TempDir(std::path::PathBuf);
+    impl TempDir {
+        fn new() -> io::Result<Self> {
+            let mut path = std::env::temp_dir();
+            let random_name: [u32; 2] = rand::random();
+            path.push(format!("terminus-test-{:08x}{:08x}", random_name[0], random_name[1]));
+            std::fs::create_dir_all(&path)?;
+            Ok(TempDir(path))
+        }
+        fn path(&self) -> &std::path::Path {
+            &self.0
+        }
+    }
+    impl Drop for TempDir {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+    fn tempdir() -> io::Result<TempDir> {
+        TempDir::new()
+    }
+
+    #[test]
+    fn export_import_layer_with_rollup() {
         let dir1 = tempdir().unwrap();
         let store1 = Arc::new(DirectoryLayerStore::new(dir1.path()));
         let dir2 = tempdir().unwrap();
         let store2 = Arc::new(DirectoryLayerStore::new(dir2.path()));
 
-        let mut builder = store1.create_base_layer().await.unwrap();
+        let mut builder = store1.create_base_layer().unwrap();
         let base_name = builder.name();
 
         builder.add_value_triple(ValueTriple::new_node("cow", "likes", "duck"));
         builder.add_value_triple(ValueTriple::new_node("duck", "hates", "cow"));
 
-        builder.commit_boxed().await.unwrap();
+        builder.commit_boxed().unwrap();
 
-        let mut builder = store1.create_child_layer(base_name).await.unwrap();
+        let mut builder = store1.create_child_layer(base_name).unwrap();
         let child_name = builder.name();
 
         builder.remove_value_triple(ValueTriple::new_node("duck", "hates", "cow"));
         builder.add_value_triple(ValueTriple::new_node("duck", "likes", "cow"));
 
-        builder.commit_boxed().await.unwrap();
+        builder.commit_boxed().unwrap();
 
-        let unrolled_layer = store1.get_layer(child_name).await.unwrap().unwrap();
+        let unrolled_layer = store1.get_layer(child_name).unwrap().unwrap();
 
-        store1.clone().rollup(unrolled_layer).await.unwrap();
+        store1.clone().rollup(unrolled_layer).unwrap();
 
         let export = store1
             .export_layers(Box::new(vec![base_name, child_name].into_iter()))
-            .await
+            
             .unwrap();
 
         store2
             .import_layers(&export, Box::new(vec![base_name, child_name].into_iter()))
-            .await
+            
             .unwrap();
 
-        let imported_layer = store2.get_layer(child_name).await.unwrap().unwrap();
+        let imported_layer = store2.get_layer(child_name).unwrap().unwrap();
         let triples: Vec<_> = imported_layer
             .triples()
             .map(|t| imported_layer.id_triple_to_string(&t).unwrap())

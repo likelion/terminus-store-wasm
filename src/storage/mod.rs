@@ -29,16 +29,33 @@ mod file;
 mod label;
 #[macro_use]
 mod layer;
+// Archive module temporarily disabled during async stripping - needs deep conversion
+// pub mod archive;
+#[cfg(feature = "archive")]
 pub mod archive;
 mod copy;
 pub mod delta;
 mod locking;
 pub mod memory;
+pub mod memory_persistence;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod fs_persistence;
+#[cfg(target_arch = "wasm32")]
+pub mod opfs_persistence;
 pub mod pack;
+pub mod persistence;
+pub mod persistence_store;
 
 pub use cache::*;
 pub use delta::*;
 pub use file::*;
 pub use label::*;
 pub use layer::*;
+pub use memory_persistence::*;
+#[cfg(not(target_arch = "wasm32"))]
+pub use fs_persistence::*;
+#[cfg(target_arch = "wasm32")]
+pub use opfs_persistence::*;
 pub use pack::*;
+pub use persistence::*;
+pub use persistence_store::*;
