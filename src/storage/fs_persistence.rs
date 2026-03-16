@@ -29,36 +29,60 @@ impl FsPersistence {
         self.root.join(format!("{}.label", name))
     }
 
+    /// Serialize a label to the two-line plaintext format compatible with the
+    /// original tokio-based `DirectoryLabelStore`:
+    /// ```text
+    /// <version>\n
+    /// <layer_hex_or_empty>\n
+    /// ```
     fn write_label_file(&self, label: &Label) -> io::Result<()> {
         let layer_str = match label.layer {
             Some(id) => name_to_string(id),
-            None => "none".to_string(),
+            None => String::new(),
         };
-        let content = format!("{}\n{}", layer_str, label.version);
+        let content = format!("{}\n{}\n", label.version, layer_str);
         fs::write(self.label_path(&label.name), content)
     }
 
+    /// Deserialize a label from the two-line plaintext format compatible with
+    /// the original tokio-based `DirectoryLabelStore`.
     fn read_label_file(&self, name: &str) -> io::Result<Option<Label>> {
         let path = self.label_path(name);
         if !path.exists() {
             return Ok(None);
         }
-        let content = fs::read_to_string(&path)?;
-        let mut lines = content.lines();
-        let layer_str = lines
-            .next()
-            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "missing layer line"))?;
-        let version_str = lines
-            .next()
-            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "missing version line"))?;
-        let layer = if layer_str == "none" {
+        let data = fs::read(&path)?;
+        let s = String::from_utf8_lossy(&data);
+        let lines: Vec<&str> = s.lines().collect();
+        if lines.len() != 2 {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!(
+                    "expected label file to have two lines. contents were ({:?})",
+                    lines
+                ),
+            ));
+        }
+
+        let version_str = lines[0];
+        let layer_str = lines[1];
+
+        let version: u64 = version_str.parse().map_err(|_| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!(
+                    "expected first line of label file to be a number but it was {}",
+                    version_str
+                ),
+            )
+        })?;
+
+        let layer = if layer_str.is_empty() {
             None
         } else {
             Some(string_to_name(layer_str)?)
         };
-        let version: u64 = version_str
-            .parse()
-            .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "invalid version"))?;
+
         Ok(Some(Label {
             name: name.to_string(),
             layer,
