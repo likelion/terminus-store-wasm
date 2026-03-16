@@ -290,7 +290,7 @@ impl<P: 'static + LabelPersistence + Send + Sync> LabelStore for PersistenceLabe
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::layer::{Layer, SimpleLayerBuilder, ValueTriple};
+    use crate::layer::{Layer, ValueTriple};
     use crate::storage::cache::CachedLayerStore;
     use crate::storage::cache::LockingHashMapLayerCache;
     use crate::storage::layer::LayerStore as LayerStoreTrait;
@@ -398,7 +398,7 @@ mod tests {
         let layer = builder.commit().unwrap();
 
         // Set the head
-        let (_, version) = db.head_version().unwrap();
+        let (_, _version) = db.head_version().unwrap();
         assert!(db.set_head(&layer).unwrap());
 
         // Verify we can read back
@@ -542,7 +542,7 @@ mod tests {
 
         // Pre-create the same layer with different content
         let mut builder2 = store2.create_base_layer().unwrap();
-        let pre_name = builder2.name();
+        let _pre_name = builder2.name();
         builder2.add_value_triple(ValueTriple::new_node("pig", "says", "oink"));
         builder2.commit_boxed().unwrap();
 
@@ -870,7 +870,7 @@ mod tests {
         let persistence = MemoryPersistence::new();
 
         // set_label with a non-matching version returns Ok(None) (not an error)
-        let label = persistence.create_label("test_label").unwrap();
+        let _label = persistence.create_label("test_label").unwrap();
         let stale_label = crate::storage::label::Label {
             name: "test_label".to_string(),
             layer: None,

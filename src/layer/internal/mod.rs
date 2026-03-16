@@ -1065,9 +1065,9 @@ mod tests {
 
     use super::*;
     use crate::open_directory_store;
-    use crate::store::sync::*;
+    use crate::store::{open_memory_store, Store, StoreLayer};
 
-    fn create_base_layer(store: &SyncStore) -> SyncStoreLayer {
+    fn create_base_layer(store: &Store) -> StoreLayer {
         let builder = store.create_base_layer().unwrap();
 
         builder
@@ -1085,7 +1085,7 @@ mod tests {
 
     #[test]
     fn base_layer_addition_count() {
-        let store = open_sync_memory_store();
+        let store = open_memory_store();
 
         let layer = create_base_layer(&store);
 
@@ -1094,7 +1094,7 @@ mod tests {
 
     #[test]
     fn child_layer_addition_removal_count() {
-        let store = open_sync_memory_store();
+        let store = open_memory_store();
         let base_layer = create_base_layer(&store);
         let builder = base_layer.open_write().unwrap();
 

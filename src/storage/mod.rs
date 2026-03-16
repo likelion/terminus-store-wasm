@@ -33,7 +33,6 @@ mod layer;
 // pub mod archive;
 #[cfg(feature = "archive")]
 pub mod archive;
-mod copy;
 pub mod delta;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod fs_persistence;

@@ -1,8 +1,6 @@
 //! High-level API for working with terminus-store.
 //!
 //! It is expected that most users of this library will work exclusively with the types contained in this module.
-pub mod sync;
-
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock};
 
