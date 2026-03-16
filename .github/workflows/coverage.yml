@@ -1,5 +1,4 @@
-# Check the code coverage. The results are published at
-# <https://app.codecov.io/gh/terminusdb/terminusdb-store>.
+# Check the code coverage.
 name: Code coverage
 
 on:
@@ -20,5 +19,26 @@ jobs:
         rustup toolchain install nightly --component llvm-tools-preview
         rustup override set nightly
 
-    - name: Check code coverage
-      run: bash ci/linux_build.sh
+    - name: Install grcov
+      run: cargo install grcov
+
+    - name: Build with coverage instrumentation
+      env:
+        CARGO_INCREMENTAL: "0"
+        RUSTFLAGS: "-Cinstrument-coverage"
+      run: cargo build --verbose
+
+    - name: Run tests with coverage
+      env:
+        CARGO_INCREMENTAL: "0"
+        RUSTFLAGS: "-Cinstrument-coverage"
+        LLVM_PROFILE_FILE: "terminus-%p-%m.profraw"
+      run: cargo test --verbose
+
+    - name: Generate coverage report
+      run: |
+        grcov . -s . --binary-path ./target/debug/ -t lcov --branch \
+          --ignore-not-existing --ignore "/*" -o lcov.info
+
+    - name: Upload coverage
+      run: bash <(curl -s https://codecov.io/bash) -f lcov.info

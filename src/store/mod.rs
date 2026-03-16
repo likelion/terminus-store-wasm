@@ -5,8 +5,6 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock};
 
 use crate::layer::{IdTriple, Layer, LayerBuilder, LayerCounts, ObjectType, ValueTriple};
-// Archive store temporarily disabled during async stripping
-// use crate::storage::archive::{ArchiveLayerStore, DirectoryArchiveBackend, LruArchiveBackend};
 use crate::storage::directory::{DirectoryLabelStore, DirectoryLayerStore};
 use crate::storage::memory::{MemoryLabelStore, MemoryLayerStore};
 use crate::storage::persistence::{LabelPersistence, LayerPersistence};
@@ -899,19 +897,6 @@ pub fn open_memory_store() -> Store {
         CachedLayerStore::new(MemoryLayerStore::new(), LockingHashMapLayerCache::new()),
     )
 }
-
-// Archive store functions temporarily disabled during async stripping.
-// The archive backend requires deep async-to-sync conversion.
-// Use open_directory_store or open_memory_store instead.
-/*
-pub fn open_archive_store<P: Into<PathBuf>>(path: P, cache_size: usize) -> Store {
-    unimplemented!("archive store not yet converted to sync API")
-}
-
-pub fn open_raw_archive_store<P: Into<PathBuf>>(path: P) -> Store {
-    unimplemented!("archive store not yet converted to sync API")
-}
-*/
 
 /// Open a store that stores its data in the given directory.
 pub fn open_directory_store<P: Into<PathBuf>>(path: P) -> Store {

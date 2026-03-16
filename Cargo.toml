@@ -13,7 +13,6 @@ autoexamples = false
 
 [features]
 eprint_log = []
-archive = []
 
 [dependencies]
 byteorder = "1.5.0"
