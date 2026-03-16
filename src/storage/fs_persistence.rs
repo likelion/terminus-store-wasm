@@ -6,24 +6,8 @@ use std::io;
 use std::path::PathBuf;
 
 use super::label::Label;
-use super::layer::name_to_string;
+use super::layer::{name_to_string, string_to_name};
 use super::persistence::{LabelPersistence, LayerId, LayerPersistence};
-
-fn layer_id_to_hex(id: LayerId) -> String {
-    name_to_string(id)
-}
-
-fn hex_to_layer_id(hex: &str) -> Option<LayerId> {
-    if hex.len() != 40 {
-        return None;
-    }
-    let mut id = [0u32; 5];
-    for (i, chunk) in hex.as_bytes().chunks(8).enumerate() {
-        let s = std::str::from_utf8(chunk).ok()?;
-        id[i] = u32::from_str_radix(s, 16).ok()?;
-    }
-    Some(id)
-}
 
 /// Filesystem persistence backend.
 /// Available only on non-wasm32 targets.
@@ -38,7 +22,7 @@ impl FsPersistence {
     }
 
     fn layer_dir(&self, id: LayerId) -> PathBuf {
-        self.root.join(layer_id_to_hex(id))
+        self.root.join(name_to_string(id))
     }
 
     fn label_path(&self, name: &str) -> PathBuf {
@@ -47,7 +31,7 @@ impl FsPersistence {
 
     fn write_label_file(&self, label: &Label) -> io::Result<()> {
         let layer_str = match label.layer {
-            Some(id) => layer_id_to_hex(id),
+            Some(id) => name_to_string(id),
             None => "none".to_string(),
         };
         let content = format!("{}\n{}", layer_str, label.version);
@@ -71,9 +55,7 @@ impl FsPersistence {
             if layer_str == "none" {
                 None
             } else {
-                Some(hex_to_layer_id(layer_str).ok_or_else(|| {
-                    io::Error::new(io::ErrorKind::InvalidData, "invalid layer id")
-                })?)
+                Some(string_to_name(layer_str)?)
             };
         let version: u64 = version_str
             .parse()
@@ -124,7 +106,7 @@ impl LayerPersistence for FsPersistence {
             if entry.file_type()?.is_dir() {
                 if let Some(name) = entry.file_name().to_str() {
                     if name.len() == 40 {
-                        if let Some(id) = hex_to_layer_id(name) {
+                        if let Ok(id) = string_to_name(name) {
                             layers.push(id);
                         }
                     }
@@ -466,24 +448,21 @@ mod tests {
     #[test]
     fn hex_round_trip() {
         let id: LayerId = [0xdeadbeef, 0x12345678, 0xabcdef01, 0x00000000, 0xffffffff];
-        let hex = layer_id_to_hex(id);
+        let hex = name_to_string(id);
         assert_eq!(hex.len(), 40);
-        let parsed = hex_to_layer_id(&hex).unwrap();
+        let parsed = string_to_name(&hex).unwrap();
         assert_eq!(parsed, id);
     }
 
     #[test]
-    fn hex_invalid_length_returns_none() {
-        assert_eq!(hex_to_layer_id("abc"), None);
-        assert_eq!(hex_to_layer_id(""), None);
+    fn hex_invalid_length_returns_err() {
+        assert!(string_to_name("abc").is_err());
+        assert!(string_to_name("").is_err());
     }
 
     #[test]
-    fn hex_invalid_chars_returns_none() {
+    fn hex_invalid_chars_returns_err() {
         // 40 chars but not valid hex
-        assert_eq!(
-            hex_to_layer_id("zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"),
-            None
-        );
+        assert!(string_to_name("zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz").is_err());
     }
 }

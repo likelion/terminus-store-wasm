@@ -19,27 +19,9 @@ use std::io;
 use wasm_bindgen::prelude::*;
 
 use super::label::Label;
+#[allow(unused_imports)]
+use super::layer::{name_to_string, string_to_name};
 use super::persistence::{LabelPersistence, LayerId, LayerPersistence};
-
-/// Convert a LayerId to a 40-character lowercase hex string.
-#[allow(dead_code)]
-fn layer_id_to_hex(id: LayerId) -> String {
-    id.iter().map(|n| format!("{:08x}", n)).collect::<String>()
-}
-
-/// Parse a 40-character hex string into a LayerId, returning None if invalid.
-#[allow(dead_code)]
-fn hex_to_layer_id(hex: &str) -> Option<LayerId> {
-    if hex.len() != 40 {
-        return None;
-    }
-    let mut id = [0u32; 5];
-    for (i, chunk) in hex.as_bytes().chunks(8).enumerate() {
-        let s = std::str::from_utf8(chunk).ok()?;
-        id[i] = u32::from_str_radix(s, 16).ok()?;
-    }
-    Some(id)
-}
 
 /// Convert a JsValue error into an io::Error.
 #[allow(dead_code)]
