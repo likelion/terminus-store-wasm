@@ -37,6 +37,8 @@ pub mod memory;
 pub mod memory_persistence;
 #[cfg(target_arch = "wasm32")]
 pub mod opfs_persistence;
+#[cfg(target_arch = "wasm32")]
+pub mod opfs_tests;
 pub mod pack;
 pub mod persistence;
 pub mod persistence_store;

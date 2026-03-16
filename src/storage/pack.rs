@@ -2,6 +2,7 @@ use std::collections::{HashMap, HashSet};
 use std::fmt::Display;
 use std::io::{self, Read, Write};
 use std::path::PathBuf;
+#[cfg(not(target_arch = "wasm32"))]
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use super::cache::*;
@@ -38,10 +39,13 @@ impl<T: PersistentLayerStore> Packable for T {
         &self,
         layer_ids: Box<dyn Iterator<Item = [u32; 5]> + Send>,
     ) -> io::Result<Vec<u8>> {
+        #[cfg(not(target_arch = "wasm32"))]
         let mtime = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_secs();
+        #[cfg(target_arch = "wasm32")]
+        let mtime = 0u64;
 
         let mut enc = GzEncoder::new(Vec::new(), Compression::default());
         {
