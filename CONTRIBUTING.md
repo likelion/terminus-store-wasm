@@ -38,4 +38,4 @@ If you need to pull in any extra dependencies, make sure these are licensed
 under a Apache 2.0-compatible license. Most libraries in the Rust FOSS
 ecosystem should be fine.
 
-[GitHub Pull Request]: https://github.com/terminusdb/terminusdb-store/compare
+[GitHub Pull Request]: https://github.com/likelion/terminus-store-wasm/compare
