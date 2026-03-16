@@ -1865,6 +1865,116 @@ mod tests {
         assert_eq!(result2.unwrap_err().kind(), io::ErrorKind::InvalidInput);
     }
 
+    #[test]
+    fn apply_diff_divergent_branches_converge_to_target() {
+        let store = open_memory_store();
+
+        // Base layer: cow, cat, horse
+        let builder = store.create_base_layer().unwrap();
+        builder
+            .add_value_triple(ValueTriple::new_string_value("cow", "says", "moo"))
+            .unwrap();
+        builder
+            .add_value_triple(ValueTriple::new_string_value("cat", "says", "meow"))
+            .unwrap();
+        builder
+            .add_value_triple(ValueTriple::new_node("horse", "likes", "grass"))
+            .unwrap();
+        let base = builder.commit().unwrap();
+
+        // Divergent target: removes cow and horse, keeps cat, adds dog and bird
+        let target_builder = base.open_write().unwrap();
+        target_builder
+            .remove_value_triple(ValueTriple::new_string_value("cow", "says", "moo"))
+            .unwrap();
+        target_builder
+            .remove_value_triple(ValueTriple::new_node("horse", "likes", "grass"))
+            .unwrap();
+        target_builder
+            .add_value_triple(ValueTriple::new_string_value("dog", "says", "woof"))
+            .unwrap();
+        target_builder
+            .add_value_triple(ValueTriple::new_node("bird", "likes", "sky"))
+            .unwrap();
+        let target = target_builder.commit().unwrap();
+
+        // Collect target triples for comparison
+        let target_triples: std::collections::HashSet<_> = target
+            .triples()
+            .filter_map(|t| target.id_triple_to_string(&t))
+            .collect();
+
+        // Create a child of base and apply_diff to rebase onto target
+        let diff_builder = base.open_write().unwrap();
+        diff_builder.apply_diff(&target).unwrap();
+        let diffed = diff_builder.commit().unwrap();
+
+        // Collect diffed triples
+        let diffed_triples: std::collections::HashSet<_> = diffed
+            .triples()
+            .filter_map(|t| diffed.id_triple_to_string(&t))
+            .collect();
+
+        // The diffed layer should contain exactly the same triples as the target
+        assert_eq!(target_triples, diffed_triples);
+
+        // Explicit checks
+        assert!(diffed.value_triple_exists(&ValueTriple::new_string_value("cat", "says", "meow")));
+        assert!(diffed.value_triple_exists(&ValueTriple::new_string_value("dog", "says", "woof")));
+        assert!(diffed.value_triple_exists(&ValueTriple::new_node("bird", "likes", "sky")));
+        assert!(!diffed.value_triple_exists(&ValueTriple::new_string_value("cow", "says", "moo")));
+        assert!(!diffed.value_triple_exists(&ValueTriple::new_node("horse", "likes", "grass")));
+    }
+
+    #[test]
+    fn apply_merge_no_base_three_layers_adds_all() {
+        let store = open_memory_store();
+
+        // Three independent layers with distinct triples (including node triples)
+        let b1 = store.create_base_layer().unwrap();
+        b1.add_value_triple(ValueTriple::new_string_value("dog", "says", "woof"))
+            .unwrap();
+        b1.add_value_triple(ValueTriple::new_node("dog", "likes", "bone"))
+            .unwrap();
+        let layer1 = b1.commit().unwrap();
+
+        let b2 = store.create_base_layer().unwrap();
+        b2.add_value_triple(ValueTriple::new_string_value("cat", "says", "meow"))
+            .unwrap();
+        b2.add_value_triple(ValueTriple::new_node("cat", "likes", "fish"))
+            .unwrap();
+        let layer2 = b2.commit().unwrap();
+
+        let b3 = store.create_base_layer().unwrap();
+        b3.add_value_triple(ValueTriple::new_string_value("bird", "says", "tweet"))
+            .unwrap();
+        b3.add_value_triple(ValueTriple::new_node("bird", "likes", "sky"))
+            .unwrap();
+        let layer3 = b3.commit().unwrap();
+
+        // Merge all three without merge base
+        let merge_builder = store.create_base_layer().unwrap();
+        merge_builder
+            .apply_merge(vec![&layer1, &layer2, &layer3], None)
+            .unwrap();
+        let merged = merge_builder.commit().unwrap();
+
+        // All triples from all three layers should be present
+        assert!(merged.value_triple_exists(&ValueTriple::new_string_value("dog", "says", "woof")));
+        assert!(merged.value_triple_exists(&ValueTriple::new_node("dog", "likes", "bone")));
+        assert!(merged.value_triple_exists(&ValueTriple::new_string_value("cat", "says", "meow")));
+        assert!(merged.value_triple_exists(&ValueTriple::new_node("cat", "likes", "fish")));
+        assert!(merged.value_triple_exists(&ValueTriple::new_string_value("bird", "says", "tweet")));
+        assert!(merged.value_triple_exists(&ValueTriple::new_node("bird", "likes", "sky")));
+
+        // Verify total count matches (6 distinct triples)
+        let all_triples: Vec<_> = merged
+            .triples()
+            .filter_map(|t| merged.id_triple_to_string(&t))
+            .collect();
+        assert_eq!(6, all_triples.len());
+    }
+
     fn cached_layer_name_does_not_change_after_rollup(store: Store) {
         let builder = store.create_base_layer().unwrap();
         let base_name = builder.name();
@@ -2075,5 +2185,993 @@ mod tests {
         let mut left = store.labels().unwrap();
         left.sort();
         assert_eq!(left, two);
+    }
+
+    mod prop_tests {
+        use super::*;
+        use crate::storage::memory_persistence::MemoryPersistence;
+        use proptest::collection::vec as prop_vec;
+        use proptest::prelude::*;
+
+        /// Strategy to generate a non-empty string suitable for triple components.
+        /// Uses a restricted alphabet to keep generation fast and avoid empty strings.
+        fn triple_component() -> impl Strategy<Value = String> {
+            "[a-z][a-z0-9]{0,9}".prop_map(|s| s)
+        }
+
+        /// Strategy to generate a (subject, predicate, object) string triple.
+        fn triple_strategy() -> impl Strategy<Value = (String, String, String)> {
+            (triple_component(), triple_component(), triple_component())
+        }
+
+        // **Validates: Requirements 11.4, 13.1**
+        //
+        // Property 6: Commit Produces Retrievable Layer
+        //
+        // For any set of valid triples added to a LayerBuilder (base or child),
+        // committing the builder SHALL return a LayerId such that `get_layer`
+        // with that LayerId returns the committed layer.
+        proptest! {
+            #![proptest_config(ProptestConfig::with_cases(20))]
+
+            #[test]
+            fn prop_commit_produces_retrievable_base_layer(
+                triples in prop_vec(triple_strategy(), 1..10)
+            ) {
+                let store = open_persistence_store(MemoryPersistence::new());
+
+                // Build and commit a base layer
+                let builder = store.create_base_layer().unwrap();
+                for (s, p, o) in &triples {
+                    builder
+                        .add_value_triple(ValueTriple::new_string_value(s, p, o))
+                        .unwrap();
+                }
+                let layer = builder.commit().unwrap();
+                let layer_id = layer.name();
+
+                // Retrieve the layer by its ID
+                let retrieved = store.get_layer_from_id(layer_id).unwrap();
+                prop_assert!(retrieved.is_some(), "get_layer_from_id returned None for committed base layer");
+                let retrieved = retrieved.unwrap();
+                prop_assert_eq!(retrieved.name(), layer_id);
+            }
+
+            #[test]
+            fn prop_commit_produces_retrievable_child_layer(
+                base_triples in prop_vec(triple_strategy(), 1..5),
+                child_triples in prop_vec(triple_strategy(), 1..5),
+            ) {
+                let store = open_persistence_store(MemoryPersistence::new());
+
+                // Build and commit a base layer
+                let base_builder = store.create_base_layer().unwrap();
+                for (s, p, o) in &base_triples {
+                    base_builder
+                        .add_value_triple(ValueTriple::new_string_value(s, p, o))
+                        .unwrap();
+                }
+                let base_layer = base_builder.commit().unwrap();
+
+                // Build and commit a child layer
+                let child_builder = base_layer.open_write().unwrap();
+                for (s, p, o) in &child_triples {
+                    child_builder
+                        .add_value_triple(ValueTriple::new_string_value(s, p, o))
+                        .unwrap();
+                }
+                let child_layer = child_builder.commit().unwrap();
+                let child_id = child_layer.name();
+
+                // Retrieve the child layer by its ID
+                let retrieved = store.get_layer_from_id(child_id).unwrap();
+                prop_assert!(retrieved.is_some(), "get_layer_from_id returned None for committed child layer");
+                let retrieved = retrieved.unwrap();
+                prop_assert_eq!(retrieved.name(), child_id);
+            }
+
+            // **Validates: Requirement 13.3**
+            //
+            // Property 8: Base Layer Triple Existence
+            //
+            // For any set of triples added to a base layer builder and committed,
+            // `value_triple_exists` SHALL return true for every added triple and
+            // false for any triple not in the added set.
+            #[test]
+            fn prop_base_layer_triple_existence(
+                triples in prop_vec(triple_strategy(), 1..10),
+                absent_triples in prop_vec(triple_strategy(), 1..5),
+            ) {
+                let store = open_persistence_store(MemoryPersistence::new());
+
+                // Build and commit a base layer with the generated triples
+                let builder = store.create_base_layer().unwrap();
+                for (s, p, o) in &triples {
+                    builder
+                        .add_value_triple(ValueTriple::new_string_value(s, p, o))
+                        .unwrap();
+                }
+                let layer = builder.commit().unwrap();
+
+                // Collect the added triples into a set for membership checks
+                let added_set: std::collections::HashSet<(String, String, String)> =
+                    triples.iter().cloned().collect();
+
+                // Every added triple must exist in the committed layer
+                for (s, p, o) in &triples {
+                    prop_assert!(
+                        layer.value_triple_exists(&ValueTriple::new_string_value(s, p, o)),
+                        "Added triple ({}, {}, {}) not found in base layer",
+                        s, p, o
+                    );
+                }
+
+                // Triples not in the added set must not exist
+                for (s, p, o) in &absent_triples {
+                    if !added_set.contains(&(s.clone(), p.clone(), o.clone())) {
+                        prop_assert!(
+                            !layer.value_triple_exists(&ValueTriple::new_string_value(s, p, o)),
+                            "Triple ({}, {}, {}) should not exist in base layer",
+                            s, p, o
+                        );
+                    }
+                }
+            }
+
+            // **Validates: Requirement 13.4**
+            //
+            // Property 9: Delta Layer Correctness
+            //
+            // For any child layer C with parent P, and any triple T:
+            // `C.value_triple_exists(T)` SHALL be true if and only if T is in C's
+            // additions, or T exists in P and T is not in C's removals.
+            #[test]
+            fn prop_delta_layer_correctness(
+                parent_triples in prop_vec(triple_strategy(), 2..8),
+                child_additions in prop_vec(triple_strategy(), 1..5),
+                removal_indices in prop_vec(0..100usize, 0..3),
+            ) {
+                let store = open_persistence_store(MemoryPersistence::new());
+
+                // Build and commit the parent (base) layer
+                let base_builder = store.create_base_layer().unwrap();
+                for (s, p, o) in &parent_triples {
+                    base_builder
+                        .add_value_triple(ValueTriple::new_string_value(s, p, o))
+                        .unwrap();
+                }
+                let parent_layer = base_builder.commit().unwrap();
+
+                // Determine which parent triples to remove in the child
+                let parent_set: Vec<(String, String, String)> =
+                    parent_triples.iter().cloned().collect();
+                let removals: std::collections::HashSet<(String, String, String)> =
+                    removal_indices
+                        .iter()
+                        .filter_map(|&i| parent_set.get(i % parent_set.len()).cloned())
+                        .collect();
+
+                // Build and commit the child (delta) layer
+                let child_builder = parent_layer.open_write().unwrap();
+                for (s, p, o) in &child_additions {
+                    child_builder
+                        .add_value_triple(ValueTriple::new_string_value(s, p, o))
+                        .unwrap();
+                }
+                for (s, p, o) in &removals {
+                    child_builder
+                        .remove_value_triple(ValueTriple::new_string_value(s, p, o))
+                        .unwrap();
+                }
+                let child_layer = child_builder.commit().unwrap();
+
+                // Compute expected visible set: parent triples minus removals, plus additions
+                let parent_visible: std::collections::HashSet<(String, String, String)> =
+                    parent_set.iter().cloned().collect();
+                let addition_set: std::collections::HashSet<(String, String, String)> =
+                    child_additions.iter().cloned().collect();
+                let expected: std::collections::HashSet<(String, String, String)> =
+                    parent_visible
+                        .difference(&removals)
+                        .cloned()
+                        .chain(addition_set.iter().cloned())
+                        .collect();
+
+                // Verify: every expected triple exists
+                for (s, p, o) in &expected {
+                    prop_assert!(
+                        child_layer.value_triple_exists(&ValueTriple::new_string_value(s, p, o)),
+                        "Expected triple ({}, {}, {}) not found in child layer",
+                        s, p, o
+                    );
+                }
+
+                // Verify: removed parent triples that were NOT re-added should be absent
+                for (s, p, o) in &removals {
+                    if !addition_set.contains(&(s.clone(), p.clone(), o.clone())) {
+                        prop_assert!(
+                            !child_layer.value_triple_exists(&ValueTriple::new_string_value(s, p, o)),
+                            "Removed triple ({}, {}, {}) should not exist in child layer",
+                            s, p, o
+                        );
+                    }
+                }
+            }
+
+            // **Validates: Requirements 14.1, 14.2, 14.3**
+            //
+            // Property 10: Rollup Equivalence
+            //
+            // For any layer L at the end of a delta chain, `rollup(L)` SHALL
+            // produce a new base layer R such that: (a) for all triples T,
+            // `L.triple_exists(T) ⟺ R.triple_exists(T)`, (b) R has no parent
+            // (via the rollup mechanism), and (c) the original layer L and its
+            // delta chain are unmodified.
+            #[test]
+            fn prop_rollup_equivalence(
+                base_triples in prop_vec(triple_strategy(), 1..8),
+                delta_layers in prop_vec(
+                    (prop_vec(triple_strategy(), 0..5), prop_vec(0..100usize, 0..3)),
+                    1..4
+                ),
+            ) {
+                let store = open_persistence_store(MemoryPersistence::new());
+
+                // Build and commit a base layer
+                let base_builder = store.create_base_layer().unwrap();
+                for (s, p, o) in &base_triples {
+                    base_builder
+                        .add_value_triple(ValueTriple::new_string_value(s, p, o))
+                        .unwrap();
+                }
+                let mut current_layer = base_builder.commit().unwrap();
+
+                // Build a chain of delta layers
+                // Track all triples that have been added so far for removal candidates
+                let mut all_added: Vec<(String, String, String)> = base_triples.clone();
+
+                for (additions, removal_indices) in &delta_layers {
+                    let child_builder = current_layer.open_write().unwrap();
+
+                    // Add new triples
+                    for (s, p, o) in additions {
+                        child_builder
+                            .add_value_triple(ValueTriple::new_string_value(s, p, o))
+                            .unwrap();
+                    }
+
+                    // Remove some existing triples (using indices into all_added)
+                    if !all_added.is_empty() {
+                        let mut removed = std::collections::HashSet::new();
+                        for &idx in removal_indices {
+                            let triple = &all_added[idx % all_added.len()];
+                            if removed.insert(triple.clone()) {
+                                child_builder
+                                    .remove_value_triple(ValueTriple::new_string_value(
+                                        &triple.0, &triple.1, &triple.2,
+                                    ))
+                                    .unwrap();
+                            }
+                        }
+                    }
+
+                    current_layer = child_builder.commit().unwrap();
+                    all_added.extend(additions.iter().cloned());
+                }
+
+                let final_layer_name = current_layer.name();
+
+                // Collect all triples from the original (pre-rollup) layer
+                let original_triples: std::collections::HashSet<_> = current_layer
+                    .triples()
+                    .filter_map(|t| current_layer.id_triple_to_string(&t))
+                    .collect();
+
+                // Perform rollup
+                current_layer.rollup().unwrap();
+
+                // Re-fetch the layer after rollup
+                let rolled_layer = store.get_layer_from_id(final_layer_name).unwrap().unwrap();
+
+                // Collect all triples from the rolled-up layer
+                let rolled_triples: std::collections::HashSet<_> = rolled_layer
+                    .triples()
+                    .filter_map(|t| rolled_layer.id_triple_to_string(&t))
+                    .collect();
+
+                // (a) All triples must match between original and rolled-up layer
+                prop_assert_eq!(
+                    &original_triples,
+                    &rolled_triples,
+                    "Triples differ after rollup"
+                );
+
+                // (b) Verify every original triple exists in rolled-up layer via value_triple_exists
+                for vt in &original_triples {
+                    prop_assert!(
+                        rolled_layer.value_triple_exists(vt),
+                        "Original triple {:?} not found in rolled-up layer",
+                        vt
+                    );
+                }
+
+                // (c) Verify every rolled-up triple exists in original layer
+                for vt in &rolled_triples {
+                    prop_assert!(
+                        current_layer.value_triple_exists(vt),
+                        "Rolled-up triple {:?} not found in original layer",
+                        vt
+                    );
+                }
+            }
+
+            // **Validates: Requirement 14.4**
+            //
+            // Property 11: Rollup-Upto Correctness
+            //
+            // For any layer L and any ancestor A in L's delta chain,
+            // `rollup_upto(L, A)` SHALL produce a layer that contains the same
+            // triples as L.
+            #[test]
+            fn prop_rollup_upto_correctness(
+                base_triples in prop_vec(triple_strategy(), 1..6),
+                mid_additions in prop_vec(triple_strategy(), 1..5),
+                top_additions in prop_vec(triple_strategy(), 1..5),
+                mid_removal_indices in prop_vec(0..100usize, 0..2),
+                top_removal_indices in prop_vec(0..100usize, 0..2),
+            ) {
+                let store = open_persistence_store(MemoryPersistence::new());
+
+                // Build base layer (this will be the "upto" ancestor)
+                let base_builder = store.create_base_layer().unwrap();
+                for (s, p, o) in &base_triples {
+                    base_builder
+                        .add_value_triple(ValueTriple::new_string_value(s, p, o))
+                        .unwrap();
+                }
+                let base_layer = base_builder.commit().unwrap();
+
+                // Build middle delta layer
+                let mid_builder = base_layer.open_write().unwrap();
+                for (s, p, o) in &mid_additions {
+                    mid_builder
+                        .add_value_triple(ValueTriple::new_string_value(s, p, o))
+                        .unwrap();
+                }
+                // Remove some base triples
+                if !base_triples.is_empty() {
+                    let mut removed = std::collections::HashSet::new();
+                    for &idx in &mid_removal_indices {
+                        let triple = &base_triples[idx % base_triples.len()];
+                        if removed.insert(triple.clone()) {
+                            mid_builder
+                                .remove_value_triple(ValueTriple::new_string_value(
+                                    &triple.0, &triple.1, &triple.2,
+                                ))
+                                .unwrap();
+                        }
+                    }
+                }
+                let mid_layer = mid_builder.commit().unwrap();
+
+                // Build top delta layer
+                let top_builder = mid_layer.open_write().unwrap();
+                for (s, p, o) in &top_additions {
+                    top_builder
+                        .add_value_triple(ValueTriple::new_string_value(s, p, o))
+                        .unwrap();
+                }
+                // Remove some mid-layer triples
+                let all_so_far: Vec<_> = base_triples.iter().chain(mid_additions.iter()).cloned().collect();
+                if !all_so_far.is_empty() {
+                    let mut removed = std::collections::HashSet::new();
+                    for &idx in &top_removal_indices {
+                        let triple = &all_so_far[idx % all_so_far.len()];
+                        if removed.insert(triple.clone()) {
+                            top_builder
+                                .remove_value_triple(ValueTriple::new_string_value(
+                                    &triple.0, &triple.1, &triple.2,
+                                ))
+                                .unwrap();
+                        }
+                    }
+                }
+                let top_layer = top_builder.commit().unwrap();
+                let top_name = top_layer.name();
+
+                // Collect all triples from the original top layer before rollup_upto
+                let original_triples: std::collections::HashSet<_> = top_layer
+                    .triples()
+                    .filter_map(|t| top_layer.id_triple_to_string(&t))
+                    .collect();
+
+                // Perform rollup_upto the base layer
+                top_layer.rollup_upto(&base_layer).unwrap();
+
+                // Re-fetch the layer after rollup_upto
+                let rolled_layer = store.get_layer_from_id(top_name).unwrap().unwrap();
+
+                // Collect all triples from the rolled-up layer
+                let rolled_triples: std::collections::HashSet<_> = rolled_layer
+                    .triples()
+                    .filter_map(|t| rolled_layer.id_triple_to_string(&t))
+                    .collect();
+
+                // All triples must match
+                prop_assert_eq!(
+                    &original_triples,
+                    &rolled_triples,
+                    "Triples differ after rollup_upto"
+                );
+
+                // Verify every original triple exists in rolled-up layer
+                for vt in &original_triples {
+                    prop_assert!(
+                        rolled_layer.value_triple_exists(vt),
+                        "Original triple {:?} not found after rollup_upto",
+                        vt
+                    );
+                }
+            }
+
+            // **Validates: Requirements 15.1, 15.2**
+            //
+            // Property 12: Squash Equivalence
+            //
+            // For any child layer C, `squash(C)` SHALL produce a new layer S
+            // such that for all triples T, `C.triple_exists(T) ⟺ S.triple_exists(T)`.
+            #[test]
+            fn prop_squash_equivalence(
+                parent_triples in prop_vec(triple_strategy(), 1..8),
+                child_additions in prop_vec(triple_strategy(), 1..5),
+                removal_indices in prop_vec(0..100usize, 0..3),
+            ) {
+                let store = open_persistence_store(MemoryPersistence::new());
+
+                // Build and commit a parent (base) layer
+                let base_builder = store.create_base_layer().unwrap();
+                for (s, p, o) in &parent_triples {
+                    base_builder
+                        .add_value_triple(ValueTriple::new_string_value(s, p, o))
+                        .unwrap();
+                }
+                let parent_layer = base_builder.commit().unwrap();
+
+                // Build and commit a child (delta) layer with additions and removals
+                let child_builder = parent_layer.open_write().unwrap();
+                for (s, p, o) in &child_additions {
+                    child_builder
+                        .add_value_triple(ValueTriple::new_string_value(s, p, o))
+                        .unwrap();
+                }
+                // Remove some parent triples
+                if !parent_triples.is_empty() {
+                    let mut removed = std::collections::HashSet::new();
+                    for &idx in &removal_indices {
+                        let triple = &parent_triples[idx % parent_triples.len()];
+                        if removed.insert(triple.clone()) {
+                            child_builder
+                                .remove_value_triple(ValueTriple::new_string_value(
+                                    &triple.0, &triple.1, &triple.2,
+                                ))
+                                .unwrap();
+                        }
+                    }
+                }
+                let child_layer = child_builder.commit().unwrap();
+
+                // Collect all triples from the original child layer before squash
+                let original_triples: std::collections::HashSet<_> = child_layer
+                    .triples()
+                    .filter_map(|t| child_layer.id_triple_to_string(&t))
+                    .collect();
+
+                // Perform squash
+                let squashed_layer = child_layer.squash().unwrap();
+
+                // Collect all triples from the squashed layer
+                let squashed_triples: std::collections::HashSet<_> = squashed_layer
+                    .triples()
+                    .filter_map(|t| squashed_layer.id_triple_to_string(&t))
+                    .collect();
+
+                // (a) Triple sets must be identical
+                prop_assert_eq!(
+                    &original_triples,
+                    &squashed_triples,
+                    "Triples differ after squash"
+                );
+
+                // (b) Every original triple exists in squashed layer
+                for vt in &original_triples {
+                    prop_assert!(
+                        squashed_layer.value_triple_exists(vt),
+                        "Original triple {:?} not found in squashed layer",
+                        vt
+                    );
+                }
+
+                // (c) Every squashed triple exists in original child layer
+                for vt in &squashed_triples {
+                    prop_assert!(
+                        child_layer.value_triple_exists(vt),
+                        "Squashed triple {:?} not found in original child layer",
+                        vt
+                    );
+                }
+            }
+
+            // **Validates: Requirement 16.1**
+            //
+            // Property 13: Merge Union of Additions
+            //
+            // For any two divergent branches from a common ancestor, merging
+            // them SHALL produce a layer whose additions are the union of all
+            // additions from all input branches.
+            #[test]
+            fn prop_merge_union_of_additions(
+                base_triples in prop_vec(triple_strategy(), 1..6),
+                branch_a_additions in prop_vec(triple_strategy(), 1..5),
+                branch_b_additions in prop_vec(triple_strategy(), 1..5),
+            ) {
+                let store = open_persistence_store(MemoryPersistence::new());
+
+                // Build and commit a common ancestor (base) layer
+                let base_builder = store.create_base_layer().unwrap();
+                for (s, p, o) in &base_triples {
+                    base_builder
+                        .add_value_triple(ValueTriple::new_string_value(s, p, o))
+                        .unwrap();
+                }
+                let merge_base = base_builder.commit().unwrap();
+
+                // Branch A: add some triples
+                let branch_a_builder = merge_base.open_write().unwrap();
+                for (s, p, o) in &branch_a_additions {
+                    branch_a_builder
+                        .add_value_triple(ValueTriple::new_string_value(s, p, o))
+                        .unwrap();
+                }
+                let branch_a = branch_a_builder.commit().unwrap();
+
+                // Branch B: add some triples
+                let branch_b_builder = merge_base.open_write().unwrap();
+                for (s, p, o) in &branch_b_additions {
+                    branch_b_builder
+                        .add_value_triple(ValueTriple::new_string_value(s, p, o))
+                        .unwrap();
+                }
+                let branch_b = branch_b_builder.commit().unwrap();
+
+                // Merge on top of branch_a
+                let merge_builder = branch_a.open_write().unwrap();
+                merge_builder
+                    .apply_merge(vec![&branch_a, &branch_b], Some(&merge_base))
+                    .unwrap();
+                let merged = merge_builder.commit().unwrap();
+
+                // Compute expected: base triples + branch_a additions + branch_b additions
+                let base_set: std::collections::HashSet<(String, String, String)> =
+                    base_triples.iter().cloned().collect();
+                let a_set: std::collections::HashSet<(String, String, String)> =
+                    branch_a_additions.iter().cloned().collect();
+                let b_set: std::collections::HashSet<(String, String, String)> =
+                    branch_b_additions.iter().cloned().collect();
+                let expected: std::collections::HashSet<(String, String, String)> =
+                    base_set.iter().chain(a_set.iter()).chain(b_set.iter()).cloned().collect();
+
+                // Every expected triple must exist in the merged layer
+                for (s, p, o) in &expected {
+                    prop_assert!(
+                        merged.value_triple_exists(&ValueTriple::new_string_value(s, p, o)),
+                        "Expected triple ({}, {}, {}) not found in merged layer",
+                        s, p, o
+                    );
+                }
+
+                // Every triple in the merged layer should be in the expected set
+                let merged_triples: std::collections::HashSet<_> = merged
+                    .triples()
+                    .filter_map(|t| merged.id_triple_to_string(&t))
+                    .collect();
+                for vt in &merged_triples {
+                    let tuple = (vt.subject.clone(), vt.predicate.clone(), vt.object.clone());
+                    // Check that the triple is one we expect: either from base, branch_a, or branch_b
+                    let is_expected = base_set.iter().chain(a_set.iter()).chain(b_set.iter())
+                        .any(|(s, p, o)| {
+                            *vt == ValueTriple::new_string_value(s, p, o)
+                        });
+                    prop_assert!(
+                        is_expected,
+                        "Unexpected triple {:?} found in merged layer",
+                        tuple
+                    );
+                }
+            }
+
+            // **Validates: Requirement 16.2**
+            //
+            // Property 14: Merge Removal Wins
+            //
+            // For any merge of branches where at least one branch removes a
+            // triple that exists in the common ancestor, the merged layer SHALL
+            // not contain that triple.
+            #[test]
+            fn prop_merge_removal_wins(
+                base_triples in prop_vec(triple_strategy(), 2..8),
+                branch_a_additions in prop_vec(triple_strategy(), 0..4),
+                removal_indices in prop_vec(0..100usize, 1..3),
+            ) {
+                let store = open_persistence_store(MemoryPersistence::new());
+
+                // Build and commit a common ancestor (base) layer
+                let base_builder = store.create_base_layer().unwrap();
+                for (s, p, o) in &base_triples {
+                    base_builder
+                        .add_value_triple(ValueTriple::new_string_value(s, p, o))
+                        .unwrap();
+                }
+                let merge_base = base_builder.commit().unwrap();
+
+                // Branch A: add some triples (no removals)
+                let branch_a_builder = merge_base.open_write().unwrap();
+                for (s, p, o) in &branch_a_additions {
+                    branch_a_builder
+                        .add_value_triple(ValueTriple::new_string_value(s, p, o))
+                        .unwrap();
+                }
+                let branch_a = branch_a_builder.commit().unwrap();
+
+                // Branch B: remove some base triples
+                let branch_b_builder = merge_base.open_write().unwrap();
+                let mut removals = std::collections::HashSet::new();
+                for &idx in &removal_indices {
+                    let triple = &base_triples[idx % base_triples.len()];
+                    if removals.insert(triple.clone()) {
+                        branch_b_builder
+                            .remove_value_triple(ValueTriple::new_string_value(
+                                &triple.0, &triple.1, &triple.2,
+                            ))
+                            .unwrap();
+                    }
+                }
+                let branch_b = branch_b_builder.commit().unwrap();
+
+                // Merge on top of branch_a
+                let merge_builder = branch_a.open_write().unwrap();
+                merge_builder
+                    .apply_merge(vec![&branch_a, &branch_b], Some(&merge_base))
+                    .unwrap();
+                let merged = merge_builder.commit().unwrap();
+
+                // Removed triples (that were NOT re-added by branch_a) must be absent
+                let a_set: std::collections::HashSet<(String, String, String)> =
+                    branch_a_additions.iter().cloned().collect();
+                for (s, p, o) in &removals {
+                    if !a_set.contains(&(s.clone(), p.clone(), o.clone())) {
+                        prop_assert!(
+                            !merged.value_triple_exists(&ValueTriple::new_string_value(s, p, o)),
+                            "Removed triple ({}, {}, {}) should not exist in merged layer",
+                            s, p, o
+                        );
+                    }
+                }
+
+                // Non-removed base triples must still be present
+                let base_set: std::collections::HashSet<(String, String, String)> =
+                    base_triples.iter().cloned().collect();
+                for (s, p, o) in &base_set {
+                    if !removals.contains(&(s.clone(), p.clone(), o.clone())) {
+                        prop_assert!(
+                            merged.value_triple_exists(&ValueTriple::new_string_value(s, p, o)),
+                            "Non-removed base triple ({}, {}, {}) should exist in merged layer",
+                            s, p, o
+                        );
+                    }
+                }
+
+                // Branch A additions must be present
+                for (s, p, o) in &branch_a_additions {
+                    prop_assert!(
+                        merged.value_triple_exists(&ValueTriple::new_string_value(s, p, o)),
+                        "Branch A addition ({}, {}, {}) should exist in merged layer",
+                        s, p, o
+                    );
+                }
+            }
+
+            // **Validates: Requirements 17.1, 17.2, 17.4**
+            //
+            // Property 15: Export/Import Round-Trip
+            //
+            // For any set of layers in a store, exporting them to a tar+gzip
+            // pack and importing the pack into a fresh store SHALL produce
+            // layers with identical triple query results to the originals.
+            #[test]
+            fn prop_export_import_round_trip(
+                base_triples in prop_vec(triple_strategy(), 1..8),
+                child_additions in prop_vec(triple_strategy(), 1..5),
+                removal_indices in prop_vec(0..100usize, 0..3),
+            ) {
+                let source_store = open_persistence_store(MemoryPersistence::new());
+
+                // Build and commit a base layer
+                let base_builder = source_store.create_base_layer().unwrap();
+                for (s, p, o) in &base_triples {
+                    base_builder
+                        .add_value_triple(ValueTriple::new_string_value(s, p, o))
+                        .unwrap();
+                }
+                let base_layer = base_builder.commit().unwrap();
+                let base_id = base_layer.name();
+
+                // Build and commit a child layer with additions and removals
+                let child_builder = base_layer.open_write().unwrap();
+                for (s, p, o) in &child_additions {
+                    child_builder
+                        .add_value_triple(ValueTriple::new_string_value(s, p, o))
+                        .unwrap();
+                }
+                if !base_triples.is_empty() {
+                    let mut removed = std::collections::HashSet::new();
+                    for &idx in &removal_indices {
+                        let triple = &base_triples[idx % base_triples.len()];
+                        if removed.insert(triple.clone()) {
+                            child_builder
+                                .remove_value_triple(ValueTriple::new_string_value(
+                                    &triple.0, &triple.1, &triple.2,
+                                ))
+                                .unwrap();
+                        }
+                    }
+                }
+                let child_layer = child_builder.commit().unwrap();
+                let child_id = child_layer.name();
+
+                // Collect triples from both layers before export
+                let base_triples_set: std::collections::HashSet<_> = base_layer
+                    .triples()
+                    .filter_map(|t| base_layer.id_triple_to_string(&t))
+                    .collect();
+                let child_triples_set: std::collections::HashSet<_> = child_layer
+                    .triples()
+                    .filter_map(|t| child_layer.id_triple_to_string(&t))
+                    .collect();
+
+                // Export both layers
+                let layer_ids: Vec<[u32; 5]> = vec![base_id, child_id];
+                let pack = source_store
+                    .export_layers(Box::new(layer_ids.clone().into_iter()))
+                    .unwrap();
+
+                // Import into a fresh store
+                let target_store = open_persistence_store(MemoryPersistence::new());
+                target_store
+                    .import_layers(&pack, Box::new(layer_ids.clone().into_iter()))
+                    .unwrap();
+
+                // Retrieve imported layers and verify identical triples
+                let imported_base = target_store.get_layer_from_id(base_id).unwrap();
+                prop_assert!(imported_base.is_some(), "Imported base layer not found");
+                let imported_base = imported_base.unwrap();
+
+                let imported_base_triples: std::collections::HashSet<_> = imported_base
+                    .triples()
+                    .filter_map(|t| imported_base.id_triple_to_string(&t))
+                    .collect();
+                prop_assert_eq!(
+                    &base_triples_set,
+                    &imported_base_triples,
+                    "Base layer triples differ after export/import"
+                );
+
+                let imported_child = target_store.get_layer_from_id(child_id).unwrap();
+                prop_assert!(imported_child.is_some(), "Imported child layer not found");
+                let imported_child = imported_child.unwrap();
+
+                let imported_child_triples: std::collections::HashSet<_> = imported_child
+                    .triples()
+                    .filter_map(|t| imported_child.id_triple_to_string(&t))
+                    .collect();
+                prop_assert_eq!(
+                    &child_triples_set,
+                    &imported_child_triples,
+                    "Child layer triples differ after export/import"
+                );
+
+                // Also verify via value_triple_exists
+                for vt in &base_triples_set {
+                    prop_assert!(
+                        imported_base.value_triple_exists(vt),
+                        "Base triple {:?} not found in imported store",
+                        vt
+                    );
+                }
+                for vt in &child_triples_set {
+                    prop_assert!(
+                        imported_child.value_triple_exists(vt),
+                        "Child triple {:?} not found in imported store",
+                        vt
+                    );
+                }
+            }
+
+            // **Validates: Requirement 17.3**
+            //
+            // Property 16: Import Idempotence
+            //
+            // For any valid pack, importing it into a store that already
+            // contains the same layers SHALL leave the existing layers
+            // unchanged (no overwrite).
+            #[test]
+            fn prop_import_idempotence(
+                triples in prop_vec(triple_strategy(), 1..8),
+            ) {
+                let store = open_persistence_store(MemoryPersistence::new());
+
+                // Build and commit a base layer
+                let builder = store.create_base_layer().unwrap();
+                for (s, p, o) in &triples {
+                    builder
+                        .add_value_triple(ValueTriple::new_string_value(s, p, o))
+                        .unwrap();
+                }
+                let layer = builder.commit().unwrap();
+                let layer_id = layer.name();
+
+                // Collect original triples
+                let original_triples: std::collections::HashSet<_> = layer
+                    .triples()
+                    .filter_map(|t| layer.id_triple_to_string(&t))
+                    .collect();
+
+                // Export the layer
+                let layer_ids: Vec<[u32; 5]> = vec![layer_id];
+                let pack = store
+                    .export_layers(Box::new(layer_ids.clone().into_iter()))
+                    .unwrap();
+
+                // Import the pack twice into the same store
+                store
+                    .import_layers(&pack, Box::new(layer_ids.clone().into_iter()))
+                    .unwrap();
+                store
+                    .import_layers(&pack, Box::new(layer_ids.clone().into_iter()))
+                    .unwrap();
+
+                // Verify the layer is still retrievable with identical triples
+                let retrieved = store.get_layer_from_id(layer_id).unwrap();
+                prop_assert!(retrieved.is_some(), "Layer not found after double import");
+                let retrieved = retrieved.unwrap();
+
+                let retrieved_triples: std::collections::HashSet<_> = retrieved
+                    .triples()
+                    .filter_map(|t| retrieved.id_triple_to_string(&t))
+                    .collect();
+                prop_assert_eq!(
+                    &original_triples,
+                    &retrieved_triples,
+                    "Triples changed after importing pack twice"
+                );
+
+                // Verify via value_triple_exists
+                for vt in &original_triples {
+                    prop_assert!(
+                        retrieved.value_triple_exists(vt),
+                        "Triple {:?} not found after double import",
+                        vt
+                    );
+                }
+            }
+
+            // **Validates: Requirements 18.1, 18.2**
+            //
+            // Property 17: Label Create/Get Round-Trip
+            //
+            // For any valid label name, creating a label and then getting it
+            // SHALL return a label with the same name, no associated layer
+            // (None), and version 0.
+            #[test]
+            fn prop_label_create_get_round_trip(
+                label_name in "[a-z][a-z0-9]{0,9}"
+            ) {
+                let store = open_persistence_store(MemoryPersistence::new());
+
+                // Create a label via the Store API
+                let named_graph = store.create(&label_name).unwrap();
+                prop_assert_eq!(named_graph.name(), label_name.as_str());
+
+                // Get the label back via open
+                let opened = store.open(&label_name).unwrap();
+                prop_assert!(opened.is_some(), "open returned None for just-created label");
+                let opened = opened.unwrap();
+                prop_assert_eq!(opened.name(), label_name.as_str());
+
+                // Verify head is None (no layer) and version is 0
+                let (head_layer, version) = opened.head_version().unwrap();
+                prop_assert!(head_layer.is_none(), "Newly created label should have no layer");
+                prop_assert_eq!(version, 0u64, "Newly created label should have version 0");
+            }
+
+            // **Validates: Requirement 18.6**
+            //
+            // Property 18: Label Delete
+            //
+            // For any valid label name, creating a label and then deleting it
+            // SHALL return true from delete, and subsequent get_label SHALL
+            // return None.
+            #[test]
+            fn prop_label_delete(
+                label_name in "[a-z][a-z0-9]{0,9}"
+            ) {
+                let store = open_persistence_store(MemoryPersistence::new());
+
+                // Create a label
+                store.create(&label_name).unwrap();
+
+                // Delete it — should return true
+                let deleted = store.delete(&label_name).unwrap();
+                prop_assert!(deleted, "delete should return true for existing label");
+
+                // Open should now return None
+                let opened = store.open(&label_name).unwrap();
+                prop_assert!(opened.is_none(), "open should return None after deletion");
+            }
+
+            // **Validates: Requirements 21.1, 21.2**
+            //
+            // Property 21: Dictionary String Round-Trip
+            //
+            // For any string (including Unicode), adding it to a layer's
+            // dictionary during construction, committing the layer, and then
+            // looking up the assigned numeric ID SHALL return the original
+            // string exactly.
+            #[test]
+            fn prop_dictionary_string_round_trip(
+                subject in "\\PC{1,20}",
+                predicate in "\\PC{1,20}",
+                object in "\\PC{1,20}",
+            ) {
+                let store = open_persistence_store(MemoryPersistence::new());
+
+                // Build and commit a base layer with a single triple
+                let builder = store.create_base_layer().unwrap();
+                builder
+                    .add_value_triple(ValueTriple::new_string_value(&subject, &predicate, &object))
+                    .unwrap();
+                let layer = builder.commit().unwrap();
+
+                // Look up subject by string -> ID -> string
+                let subj_id = layer.subject_id(&subject);
+                prop_assert!(subj_id.is_some(), "subject_id returned None for {:?}", subject);
+                let subj_id = subj_id.unwrap();
+                let subj_back = layer.id_subject(subj_id);
+                prop_assert!(subj_back.is_some(), "id_subject returned None for id {}", subj_id);
+                prop_assert_eq!(&subj_back.unwrap(), &subject, "subject round-trip mismatch");
+
+                // Look up predicate by string -> ID -> string
+                let pred_id = layer.predicate_id(&predicate);
+                prop_assert!(pred_id.is_some(), "predicate_id returned None for {:?}", predicate);
+                let pred_id = pred_id.unwrap();
+                let pred_back = layer.id_predicate(pred_id);
+                prop_assert!(pred_back.is_some(), "id_predicate returned None for id {}", pred_id);
+                prop_assert_eq!(&pred_back.unwrap(), &predicate, "predicate round-trip mismatch");
+
+                // Look up object (string value) by string -> ID -> string
+                // Objects use the value dictionary; verify via id_triple_to_string
+                let triples: Vec<_> = layer.triples().collect();
+                prop_assert_eq!(triples.len(), 1, "Expected exactly 1 triple in layer");
+                let vt = layer.id_triple_to_string(&triples[0]);
+                prop_assert!(vt.is_some(), "id_triple_to_string returned None");
+                let vt = vt.unwrap();
+                prop_assert_eq!(&vt.subject, &subject, "triple subject mismatch");
+                prop_assert_eq!(&vt.predicate, &predicate, "triple predicate mismatch");
+                // Verify the full triple round-trips via value_triple_exists
+                prop_assert!(
+                    layer.value_triple_exists(&ValueTriple::new_string_value(&subject, &predicate, &object)),
+                    "value_triple_exists returned false for the added triple"
+                );
+            }
+        }
     }
 }

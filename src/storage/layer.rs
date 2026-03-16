@@ -1250,10 +1250,10 @@ pub fn name_to_string(name: [u32; 5]) -> String {
 }
 
 pub fn string_to_name(string: &str) -> Result<[u32; 5], std::io::Error> {
-    if string.len() != 40 {
+    if !string.is_ascii() || string.len() != 40 {
         return Err(io::Error::new(
             io::ErrorKind::Other,
-            format!("string not len 40: {}", string),
+            format!("expected 40 ASCII hex chars, got: {:?}", string),
         ));
     }
     let n1 = u32::from_str_radix(&string[..8], 16)
@@ -3480,5 +3480,54 @@ mod tests {
     fn uncached_child_layer_removals_o() {
         let (_dir, store) = make_cached_store();
         child_layer_removals_o(&store, true).unwrap();
+    }
+
+    mod proptest_layer_id {
+        use super::super::{name_to_string, string_to_name};
+        use proptest::prelude::*;
+
+        proptest! {
+            /// **Validates: Requirements 20.1, 20.2, 20.4**
+            ///
+            /// Property 19: LayerId Hex Serialization Round-Trip
+            /// For any arbitrary [u32; 5], converting to hex via name_to_string
+            /// and parsing back via string_to_name yields the original value,
+            /// and the hex string is always exactly 40 lowercase hex characters.
+            #[test]
+            fn layer_id_hex_round_trip(
+                a in any::<u32>(),
+                b in any::<u32>(),
+                c in any::<u32>(),
+                d in any::<u32>(),
+                e in any::<u32>(),
+            ) {
+                let id: [u32; 5] = [a, b, c, d, e];
+                let hex = name_to_string(id);
+
+                // Must be exactly 40 characters
+                prop_assert_eq!(hex.len(), 40);
+
+                // Must be lowercase hex only
+                prop_assert!(hex.chars().all(|ch| ch.is_ascii_hexdigit() && !ch.is_ascii_uppercase()));
+
+                // Round-trip must recover the original id
+                let parsed = string_to_name(&hex).unwrap();
+                prop_assert_eq!(parsed, id);
+            }
+
+            /// **Validates: Requirement 20.3**
+            ///
+            /// Property 20: LayerId Invalid String Rejection
+            /// Any string that is not exactly 40 hex characters must be rejected
+            /// by string_to_name with an Err.
+            #[test]
+            fn layer_id_invalid_string_rejected(s in "([0-9a-fA-F]{0,39}|[0-9a-fA-F]{41,80}|.{0,80})") {
+                // Only skip strings that happen to be exactly 40 valid hex chars
+                let is_valid_40_hex = s.len() == 40 && s.chars().all(|c| c.is_ascii_hexdigit());
+                prop_assume!(!is_valid_40_hex);
+
+                prop_assert!(string_to_name(&s).is_err());
+            }
+        }
     }
 }

@@ -369,4 +369,101 @@ mod tests {
         let read_back = p.read_file(id, "data").unwrap();
         assert_eq!(&read_back[..], b"second");
     }
+
+    mod proptest_memory_persistence {
+        use super::*;
+        use proptest::prelude::*;
+
+        /// Strategy for generating valid file names: non-empty ASCII alphanumeric
+        /// strings with underscores and dots (mimicking real layer file names).
+        fn file_name_strategy() -> impl Strategy<Value = String> {
+            "[a-z][a-z0-9_.]{0,30}".prop_filter("non-empty", |s| !s.is_empty())
+        }
+
+        proptest! {
+            /// **Validates: Requirements 8.4, 22.1**
+            ///
+            /// Property 3: Persistence Backend Write/Read Round-Trip (MemoryPersistence)
+            /// For any LayerId, file name, and byte content, writing via write_file
+            /// and reading back via read_file returns identical data.
+            #[test]
+            fn write_read_round_trip(
+                a in any::<u32>(),
+                b in any::<u32>(),
+                c in any::<u32>(),
+                d in any::<u32>(),
+                e in any::<u32>(),
+                file_name in file_name_strategy(),
+                data in proptest::collection::vec(any::<u8>(), 0..256),
+            ) {
+                let id: LayerId = [a, b, c, d, e];
+                let p = MemoryPersistence::new();
+
+                p.create_layer_dir(id).unwrap();
+                p.write_file(id, &file_name, &data).unwrap();
+
+                let read_back = p.read_file(id, &file_name).unwrap();
+                prop_assert_eq!(&read_back[..], &data[..]);
+            }
+
+            /// **Validates: Requirements 7.3, 18.4**
+            ///
+            /// Property 4: Label Optimistic Concurrency — Version Match Succeeds
+            /// Creating a label and calling set_label with the matching version
+            /// succeeds and returns a label with version V+1.
+            #[test]
+            fn label_version_match_succeeds(
+                label_name in "[a-z][a-z0-9_]{0,20}",
+                a in any::<u32>(),
+                b in any::<u32>(),
+                c in any::<u32>(),
+                d in any::<u32>(),
+                e in any::<u32>(),
+            ) {
+                let layer_id: LayerId = [a, b, c, d, e];
+                let p = MemoryPersistence::new();
+
+                let label = p.create_label(&label_name).unwrap();
+                prop_assert_eq!(label.version, 0);
+
+                let updated = p.set_label(&label, Some(layer_id)).unwrap();
+                prop_assert!(updated.is_some());
+
+                let updated = updated.unwrap();
+                prop_assert_eq!(updated.version, label.version + 1);
+                prop_assert_eq!(updated.layer, Some(layer_id));
+                prop_assert_eq!(updated.name, label_name);
+            }
+
+            /// **Validates: Requirements 7.4, 18.5**
+            ///
+            /// Property 5: Label Optimistic Concurrency — Stale Version Rejected
+            /// Creating a label, modifying the version to a non-matching value,
+            /// and calling set_label returns None.
+            #[test]
+            fn label_stale_version_rejected(
+                label_name in "[a-z][a-z0-9_]{0,20}",
+                stale_offset in 1u64..1000u64,
+                a in any::<u32>(),
+                b in any::<u32>(),
+                c in any::<u32>(),
+                d in any::<u32>(),
+                e in any::<u32>(),
+            ) {
+                let layer_id: LayerId = [a, b, c, d, e];
+                let p = MemoryPersistence::new();
+
+                let label = p.create_label(&label_name).unwrap();
+                // Stored version is 0; create a stale label with a different version
+                let stale_label = Label {
+                    name: label_name.clone(),
+                    layer: label.layer,
+                    version: label.version + stale_offset,
+                };
+
+                let result = p.set_label(&stale_label, Some(layer_id)).unwrap();
+                prop_assert_eq!(result, None);
+            }
+        }
+    }
 }

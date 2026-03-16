@@ -488,4 +488,43 @@ mod tests {
         // 40 chars but not valid hex
         assert!(string_to_name("zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz").is_err());
     }
+
+    mod proptest_fs_persistence {
+        use super::*;
+        use proptest::prelude::*;
+
+        /// Strategy for generating valid file names: non-empty ASCII alphanumeric
+        /// strings with underscores and dots (mimicking real layer file names).
+        fn file_name_strategy() -> impl Strategy<Value = String> {
+            "[a-z][a-z0-9_.]{0,30}".prop_filter("non-empty", |s| !s.is_empty())
+        }
+
+        proptest! {
+            /// **Validates: Requirements 9.5, 22.1**
+            ///
+            /// Property 3: Persistence Backend Write/Read Round-Trip (FsPersistence)
+            /// For any LayerId, file name, and byte content, writing via write_file
+            /// and reading back via read_file returns identical data.
+            #[test]
+            fn write_read_round_trip(
+                a in any::<u32>(),
+                b in any::<u32>(),
+                c in any::<u32>(),
+                d in any::<u32>(),
+                e in any::<u32>(),
+                file_name in file_name_strategy(),
+                data in proptest::collection::vec(any::<u8>(), 0..256),
+            ) {
+                let tmp = tempfile::tempdir().unwrap();
+                let p = FsPersistence::new(tmp.path().to_path_buf()).unwrap();
+                let id: LayerId = [a, b, c, d, e];
+
+                p.create_layer_dir(id).unwrap();
+                p.write_file(id, &file_name, &data).unwrap();
+
+                let read_back = p.read_file(id, &file_name).unwrap();
+                prop_assert_eq!(&read_back[..], &data[..]);
+            }
+        }
+    }
 }
