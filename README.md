@@ -1,7 +1,7 @@
 # terminus-store-wasm, a synchronous data store for triple data
 
 [![Build Status](https://github.com/likelion/terminus-store-wasm/workflows/Build/badge.svg)](https://github.com/likelion/terminus-store-wasm/actions)
-[![codecov](https://codecov.io/gh/likelion/terminus-store-wasm/branch/main/graph/badge.svg)](https://codecov.io/gh/likelion/terminus-store-wasm)
+[![codecov](https://codecov.io/github/likelion/terminus-store-wasm/branch/main/graph/badge.svg)](https://app.codecov.io/github/likelion/terminus-store-wasm)
 
 ## Overview
 This library implements a way to store triple data - data that
@@ -22,48 +22,44 @@ predicate, and `value(moo)` is the object.
 In `cow likes node(duck)`, `cow` is the subject, `likes` is the
 predicate, and `node(duck)` is the object.
 
-terminusdb-store allows you to store a lot of such facts, and search
-through them efficiently.
+terminus-store-wasm allows you to store a lot of such facts, and
+search through them efficiently.
 
-This library is intended as a common base for anyone who wishes to
-build a database containing triple data. It makes very few assumptions
-on what valid data is, only focusing on the actual storage aspect.
+This is a synchronous, WASM-compatible fork of
+[terminus-store](https://github.com/terminusdb/terminusdb-store). It
+replaces the tokio async runtime with a fully synchronous API, making
+it suitable for compilation to WebAssembly (both browser and Node.js
+targets) as well as native use.
 
-This library is tokio-enabled. Any i/o and locking happens through
-futures, and as a result, many of the functions in this library return
-futures. These futures are intended to run on a tokio runtime, and
-many of them will fail outside of one. If you do not wish to use
-tokio, there's a small sync wrapper in `store::sync` which embeds its
-own tokio runtime, exposing a purely synchronous API.
+### Storage backends
+- **Memory** — in-process, no persistence
+- **Filesystem** — native targets via `std::fs`
+- **OPFS** — browser targets via the Origin Private File System API
+
+Layer data is binary-compatible with the original terminus-store, so
+databases created by either version can be read by the other.
 
 ## Usage
-Add this to your `Cargo.toml`:
+Add the dependency pointing at this repository:
 
 ```toml
 [dependencies]
-terminus-store = "0.19.2"
+terminus-store-wasm = { git = "https://github.com/likelion/terminus-store-wasm" }
 ```
 
-create a directory where you want the store to be, then open that store with
+Open a memory-backed store:
 ```rust
-let store = terminus_store::open_directory_store("/path/to/store").await.unwrap();
+use terminus_store_wasm::open_memory_store;
+
+let store = open_memory_store();
 ```
 
-Or use the sync wrapper:
+Or a directory-backed store (native only):
 ```rust
-let store = terminus_store::open_sync_directory_store("/path/to/store").unwrap();
+use terminus_store_wasm::open_directory_store;
+
+let store = open_directory_store("/path/to/store").unwrap();
 ```
-
-For more information, [visit the documentation on docs.rs](https://docs.rs/terminus-store/).
-
-See also the `examples/` directory for some basic examples.
-
-## Upgrading from 0.19 or earlier
-Starting with version 0.20.0, terminus-store uses a new storage format, which bundles all files into a single archive, and also supports value types. Stores created using 0.19 or earlier will not work with 0.20 or later. However, there is a conversion tool to convert existing pre-v20 stores: [terminusdb-10-to-11](https://github.com/terminusdb/terminusdb-10-to-11/).
-
-## Roadmap
-
-We are constantly developing terminusdb-store to make it a high quality succinct graph representation versioned datastorage layer. To help facilitate understanding of our aims for this project we have laid out a [Roadmap](./docs/ROADMAP.md). If you would like to assist in the development of terminusdb-store, or you think something should be added to the roadmap please contact us.
 
 ## License
 terminus-store is licensed under Apache 2.0.
@@ -72,6 +68,6 @@ terminus-store is licensed under Apache 2.0.
 See [CONTRIBUTING.md](CONTRIBUTING.md)
 
 ## See also
-- The Terminus database, for which this library was written: [Website](https://terminusdb.com) - [GitHub](https://github.com/terminusdb/)
-- Our prolog bindings for this library: [terminus_store_prolog](https://github.com/terminusdb/terminus_store_prolog/)
-- The HDT format, which the terminusdb-store layer format is based on: [Website](http://www.rdfhdt.org/)
+- The original async terminus-store: [GitHub](https://github.com/terminusdb/terminusdb-store)
+- The Terminus database: [Website](https://terminusdb.com) — [GitHub](https://github.com/terminusdb/)
+- The HDT format, which the layer format is based on: [Website](http://www.rdfhdt.org/)
