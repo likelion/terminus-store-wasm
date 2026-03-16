@@ -215,5 +215,4 @@ fn construct_idmaps_from_layers<F: 'static + FileLoad + FileStore>(
         &predicate_idmaps,
         idmap_files,
     )
-    
 }

@@ -219,10 +219,8 @@ impl<F: FileLoad + FileStore + Clone> ChildLayerFiles<F> {
         let neg_sp_o_adjacency_list_maps = self.neg_sp_o_adjacency_list_files.map_all()?;
         let neg_o_ps_adjacency_list_maps = self.neg_o_ps_adjacency_list_files.map_all()?;
 
-        let pos_predicate_wavelet_tree_maps =
-            self.pos_predicate_wavelet_tree_files.map_all()?;
-        let neg_predicate_wavelet_tree_maps =
-            self.neg_predicate_wavelet_tree_files.map_all()?;
+        let pos_predicate_wavelet_tree_maps = self.pos_predicate_wavelet_tree_files.map_all()?;
+        let neg_predicate_wavelet_tree_maps = self.neg_predicate_wavelet_tree_files.map_all()?;
 
         Ok(ChildLayerMaps {
             node_dictionary_maps,

@@ -1,6 +1,5 @@
 use std::io;
 
-
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct Label {
     pub name: String,
@@ -37,11 +36,8 @@ pub trait LabelStore: Send + Sync {
     fn labels(&self) -> io::Result<Vec<Label>>;
     fn create_label(&self, name: &str) -> io::Result<Label>;
     fn get_label(&self, name: &str) -> io::Result<Option<Label>>;
-    fn set_label_option(
-        &self,
-        label: &Label,
-        layer: Option<[u32; 5]>,
-    ) -> io::Result<Option<Label>>;
+    fn set_label_option(&self, label: &Label, layer: Option<[u32; 5]>)
+        -> io::Result<Option<Label>>;
     fn delete_label(&self, name: &str) -> io::Result<bool>;
 
     fn set_label(&self, label: &Label, layer: [u32; 5]) -> io::Result<Option<Label>> {

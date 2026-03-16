@@ -112,9 +112,7 @@ impl LayerStore for CachedLayerStore {
     }
 
     fn get_layer(&self, name: [u32; 5]) -> io::Result<Option<Arc<InternalLayer>>> {
-        self.inner
-            .get_layer_with_cache(name, self.cache.clone())
-            
+        self.inner.get_layer_with_cache(name, self.cache.clone())
     }
 
     fn get_layer_with_cache(
@@ -241,7 +239,6 @@ impl LayerStore for CachedLayerStore {
     fn create_child_layer(&self, parent: [u32; 5]) -> io::Result<Box<dyn LayerBuilder>> {
         self.inner
             .create_child_layer_with_cache(parent, self.cache.clone())
-            
     }
 
     fn create_child_layer_with_cache(
@@ -249,9 +246,7 @@ impl LayerStore for CachedLayerStore {
         parent: [u32; 5],
         cache: Arc<dyn LayerCache>,
     ) -> io::Result<Box<dyn LayerBuilder>> {
-        self.inner
-            .create_child_layer_with_cache(parent, cache)
-            
+        self.inner.create_child_layer_with_cache(parent, cache)
     }
 
     fn perform_rollup(&self, layer: Arc<InternalLayer>) -> io::Result<[u32; 5]> {
@@ -266,7 +261,6 @@ impl LayerStore for CachedLayerStore {
     ) -> io::Result<[u32; 5]> {
         self.inner
             .perform_rollup_upto_with_cache(layer, upto, cache)
-            
     }
 
     fn perform_rollup_upto(
@@ -276,7 +270,6 @@ impl LayerStore for CachedLayerStore {
     ) -> io::Result<[u32; 5]> {
         self.inner
             .perform_rollup_upto_with_cache(layer, upto, self.cache.clone())
-            
     }
 
     fn perform_imprecise_rollup_upto_with_cache(
@@ -287,7 +280,6 @@ impl LayerStore for CachedLayerStore {
     ) -> io::Result<[u32; 5]> {
         self.inner
             .perform_imprecise_rollup_upto_with_cache(layer, upto, cache)
-            
     }
 
     fn perform_imprecise_rollup_upto(
@@ -297,7 +289,6 @@ impl LayerStore for CachedLayerStore {
     ) -> io::Result<[u32; 5]> {
         self.inner
             .perform_imprecise_rollup_upto_with_cache(layer, upto, self.cache.clone())
-            
     }
 
     fn register_rollup(&self, layer: [u32; 5], rollup: [u32; 5]) -> io::Result<()> {
@@ -326,11 +317,7 @@ impl LayerStore for CachedLayerStore {
         self.inner.merge_base_layer(layers, temp_dir)
     }
 
-    fn layer_is_ancestor_of(
-        &self,
-        descendant: [u32; 5],
-        ancestor: [u32; 5],
-    ) -> io::Result<bool> {
+    fn layer_is_ancestor_of(&self, descendant: [u32; 5], ancestor: [u32; 5]) -> io::Result<bool> {
         self.inner.layer_is_ancestor_of(descendant, ancestor)
     }
 
@@ -349,7 +336,6 @@ impl LayerStore for CachedLayerStore {
 
         self.inner
             .triple_addition_exists(layer, subject, predicate, object)
-            
     }
 
     fn triple_removal_exists(
@@ -367,7 +353,6 @@ impl LayerStore for CachedLayerStore {
 
         self.inner
             .triple_removal_exists(layer, subject, predicate, object)
-            
     }
 
     fn triple_additions(
@@ -436,9 +421,7 @@ impl LayerStore for CachedLayerStore {
             }
         }
 
-        self.inner
-            .triple_additions_sp(layer, subject, predicate)
-            
+        self.inner.triple_additions_sp(layer, subject, predicate)
     }
 
     fn triple_removals_sp(
@@ -453,9 +436,7 @@ impl LayerStore for CachedLayerStore {
             }
         }
 
-        self.inner
-            .triple_removals_sp(layer, subject, predicate)
-            
+        self.inner.triple_removals_sp(layer, subject, predicate)
     }
 
     fn triple_additions_p(
@@ -561,7 +542,10 @@ pub mod tests {
         fn new() -> io::Result<Self> {
             let mut path = std::env::temp_dir();
             let random_name: [u32; 2] = rand::random();
-            path.push(format!("terminus-test-{:08x}{:08x}", random_name[0], random_name[1]));
+            path.push(format!(
+                "terminus-test-{:08x}{:08x}",
+                random_name[0], random_name[1]
+            ));
             std::fs::create_dir_all(&path)?;
             Ok(TempDir(path))
         }

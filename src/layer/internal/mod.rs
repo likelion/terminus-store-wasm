@@ -1128,9 +1128,7 @@ mod tests {
         builder.add_triple(3, 3, 3).unwrap();
         builder.finalize().unwrap();
 
-        let layer = BaseLayer::load_from_files([1, 2, 3, 4, 5], &files)
-            
-            .unwrap();
+        let layer = BaseLayer::load_from_files([1, 2, 3, 4, 5], &files).unwrap();
 
         assert_eq!(1, layer.internal_triple_layer_addition_count());
     }

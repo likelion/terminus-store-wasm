@@ -7,7 +7,7 @@ use std::path::PathBuf;
 
 use super::label::Label;
 use super::layer::name_to_string;
-use super::persistence::{LayerId, LayerPersistence, LabelPersistence};
+use super::persistence::{LabelPersistence, LayerId, LayerPersistence};
 
 fn layer_id_to_hex(id: LayerId) -> String {
     name_to_string(id)
@@ -61,22 +61,23 @@ impl FsPersistence {
         }
         let content = fs::read_to_string(&path)?;
         let mut lines = content.lines();
-        let layer_str = lines.next().ok_or_else(|| {
-            io::Error::new(io::ErrorKind::InvalidData, "missing layer line")
-        })?;
-        let version_str = lines.next().ok_or_else(|| {
-            io::Error::new(io::ErrorKind::InvalidData, "missing version line")
-        })?;
-        let layer = if layer_str == "none" {
-            None
-        } else {
-            Some(hex_to_layer_id(layer_str).ok_or_else(|| {
-                io::Error::new(io::ErrorKind::InvalidData, "invalid layer id")
-            })?)
-        };
-        let version: u64 = version_str.parse().map_err(|_| {
-            io::Error::new(io::ErrorKind::InvalidData, "invalid version")
-        })?;
+        let layer_str = lines
+            .next()
+            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "missing layer line"))?;
+        let version_str = lines
+            .next()
+            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "missing version line"))?;
+        let layer =
+            if layer_str == "none" {
+                None
+            } else {
+                Some(hex_to_layer_id(layer_str).ok_or_else(|| {
+                    io::Error::new(io::ErrorKind::InvalidData, "invalid layer id")
+                })?)
+            };
+        let version: u64 = version_str
+            .parse()
+            .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "invalid version"))?;
         Ok(Some(Label {
             name: name.to_string(),
             layer,
@@ -480,6 +481,9 @@ mod tests {
     #[test]
     fn hex_invalid_chars_returns_none() {
         // 40 chars but not valid hex
-        assert_eq!(hex_to_layer_id("zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"), None);
+        assert_eq!(
+            hex_to_layer_id("zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"),
+            None
+        );
     }
 }

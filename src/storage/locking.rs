@@ -1,5 +1,5 @@
 #![allow(unused)]
-use std::io::{self, Read, Write, Seek, SeekFrom};
+use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::path::*;
 
 /// A simple file wrapper for read access (replaces the async LockedFile).
@@ -11,9 +11,7 @@ pub struct LockedFile {
 
 impl LockedFile {
     pub fn open<P: AsRef<Path>>(path: P) -> io::Result<Self> {
-        let file = std::fs::OpenOptions::new()
-            .read(true)
-            .open(path)?;
+        let file = std::fs::OpenOptions::new().read(true).open(path)?;
         Ok(LockedFile { file })
     }
 

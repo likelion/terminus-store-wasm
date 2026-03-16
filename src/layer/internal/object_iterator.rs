@@ -276,9 +276,7 @@ mod tests {
 
         let base_layer_files = base_layer_files();
 
-        let mut builder = BaseLayerFileBuilder::from_files(&base_layer_files)
-            
-            .unwrap();
+        let mut builder = BaseLayerFileBuilder::from_files(&base_layer_files).unwrap();
 
         builder.add_nodes(nodes.into_iter().map(|s| s.to_string()));
         builder.add_predicates(predicates.into_iter().map(|s| s.to_string()));
@@ -302,9 +300,7 @@ mod tests {
     fn example_base_layer() -> InternalLayer {
         let base_layer_files = example_base_layer_files();
 
-        let layer = BaseLayer::load_from_files([1, 2, 3, 4, 5], &base_layer_files)
-            
-            .unwrap();
+        let layer = BaseLayer::load_from_files([1, 2, 3, 4, 5], &base_layer_files).unwrap();
 
         layer
     }

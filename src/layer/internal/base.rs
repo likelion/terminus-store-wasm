@@ -157,8 +157,7 @@ impl<F: 'static + FileLoad + FileStore + Clone> BaseLayerFileBuilder<F> {
             files.node_dictionary_files.clone(),
             files.predicate_dictionary_files.clone(),
             files.value_dictionary_files.clone(),
-        )
-        ?;
+        )?;
 
         Ok(BaseLayerFileBuilder {
             files: files.clone(),
@@ -284,15 +283,9 @@ impl<F: 'static + FileLoad + FileStore + Clone> BaseLayerFileBuilder<F> {
         let node_dict_blocks_map = files.node_dictionary_files.blocks_file.map()?;
         let node_dict_offsets_map = files.node_dictionary_files.offsets_file.map()?;
         let predicate_dict_blocks_map = files.predicate_dictionary_files.blocks_file.map()?;
-        let predicate_dict_offsets_map =
-            files.predicate_dictionary_files.offsets_file.map()?;
-        let value_dict_types_present_map = files
-            .value_dictionary_files
-            .types_present_file
-            .map()
-            ?;
-        let value_dict_type_offsets_map =
-            files.value_dictionary_files.type_offsets_file.map()?;
+        let predicate_dict_offsets_map = files.predicate_dictionary_files.offsets_file.map()?;
+        let value_dict_types_present_map = files.value_dictionary_files.types_present_file.map()?;
+        let value_dict_type_offsets_map = files.value_dictionary_files.type_offsets_file.map()?;
         let value_dict_blocks_map = files.value_dictionary_files.blocks_file.map()?;
         let value_dict_offsets_map = files.value_dictionary_files.offsets_file.map()?;
 
@@ -339,8 +332,7 @@ impl<F: 'static + FileLoad + FileStore> BaseLayerFileBuilderPhase2<F> {
             num_predicates,
             num_values,
             None,
-        )
-        ?;
+        )?;
 
         Ok(BaseLayerFileBuilderPhase2 { files, builder })
     }
@@ -348,12 +340,7 @@ impl<F: 'static + FileLoad + FileStore> BaseLayerFileBuilderPhase2<F> {
     /// Add the given subject, predicate and object.
     ///
     /// This will panic if a greater triple has already been added.
-    pub fn add_triple(
-        &mut self,
-        subject: u64,
-        predicate: u64,
-        object: u64,
-    ) -> io::Result<()> {
+    pub fn add_triple(&mut self, subject: u64, predicate: u64, object: u64) -> io::Result<()> {
         self.builder.add_triple(subject, predicate, object)
     }
 
@@ -391,8 +378,7 @@ impl<F: 'static + FileLoad + FileStore> BaseLayerFileBuilderPhase2<F> {
             o_ps_adjacency_list_files,
             None,
             predicate_wavelet_tree_files,
-        )
-        ?;
+        )?;
 
         chrono_log!("finalized base builder");
 
@@ -445,9 +431,7 @@ pub mod base_tests {
     pub fn example_base_layer() -> InternalLayer {
         let base_layer_files = example_base_layer_files().unwrap();
 
-        BaseLayer::load_from_files([1, 2, 3, 4, 5], &base_layer_files)
-            
-            .unwrap()
+        BaseLayer::load_from_files([1, 2, 3, 4, 5], &base_layer_files).unwrap()
     }
 
     #[test]
@@ -573,16 +557,12 @@ pub mod base_tests {
     #[test]
     fn create_empty_base_layer() {
         let base_layer_files = base_layer_files();
-        let builder = BaseLayerFileBuilder::from_files(&base_layer_files)
-            
-            .unwrap();
+        let builder = BaseLayerFileBuilder::from_files(&base_layer_files).unwrap();
 
         let builder = builder.into_phase2().unwrap();
         builder.finalize().unwrap();
 
-        let layer = BaseLayer::load_from_files([1, 2, 3, 4, 5], &base_layer_files)
-            
-            .unwrap();
+        let layer = BaseLayer::load_from_files([1, 2, 3, 4, 5], &base_layer_files).unwrap();
 
         assert_eq!(0, layer.node_and_value_count());
         assert_eq!(0, layer.predicate_count());
@@ -604,19 +584,9 @@ pub mod base_tests {
     #[test]
     fn count_triples_of_empty_base_layer() {
         let layer_files = base_layer_files();
-        let builder = BaseLayerFileBuilder::from_files(&layer_files)
-            
-            .unwrap();
-        builder
-            .into_phase2()
-            
-            .unwrap()
-            .finalize()
-            
-            .unwrap();
-        let layer = BaseLayer::load_from_files([1, 2, 3, 4, 5], &layer_files)
-            
-            .unwrap();
+        let builder = BaseLayerFileBuilder::from_files(&layer_files).unwrap();
+        builder.into_phase2().unwrap().finalize().unwrap();
+        let layer = BaseLayer::load_from_files([1, 2, 3, 4, 5], &layer_files).unwrap();
 
         assert_eq!(0, layer.internal_triple_layer_addition_count());
         assert_eq!(0, layer.internal_triple_layer_removal_count());

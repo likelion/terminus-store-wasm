@@ -3,10 +3,9 @@
 use locking::*;
 use std::collections::HashMap;
 use std::fs;
-use std::io::{self, Read, Write, SeekFrom};
+use std::io::{self, Read, SeekFrom, Write};
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
-
 
 pub use tdb_succinct_wasm::storage::file::*;
 
@@ -460,7 +459,10 @@ mod tests {
         fn new() -> io::Result<Self> {
             let mut path = std::env::temp_dir();
             let random_name: [u32; 2] = rand::random();
-            path.push(format!("terminus-test-{:08x}{:08x}", random_name[0], random_name[1]));
+            path.push(format!(
+                "terminus-test-{:08x}{:08x}",
+                random_name[0], random_name[1]
+            ));
             std::fs::create_dir_all(&path)?;
             Ok(TempDir(path))
         }
@@ -487,12 +489,7 @@ mod tests {
         w.write_all(&[1, 2, 3]).unwrap();
         w.flush().unwrap();
         let mut buf = Vec::new();
-        file.open_read()
-            
-            .unwrap()
-            .read_to_end(&mut buf)
-            
-            .unwrap();
+        file.open_read().unwrap().read_to_end(&mut buf).unwrap();
 
         assert_eq!(vec![1, 2, 3], buf);
     }
@@ -699,7 +696,6 @@ mod tests {
         let _rolled_id = store
             .clone()
             .rollup_upto(unrolled_layer, base_name)
-            
             .unwrap();
         let rolled_layer = store.get_layer(child_name).unwrap().unwrap();
 

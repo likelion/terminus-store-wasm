@@ -4,7 +4,6 @@ use std::io::{self, Read, Write};
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-
 use super::cache::*;
 use super::consts::*;
 use super::file::*;
@@ -333,7 +332,10 @@ mod tests {
         fn new() -> io::Result<Self> {
             let mut path = std::env::temp_dir();
             let random_name: [u32; 2] = rand::random();
-            path.push(format!("terminus-test-{:08x}{:08x}", random_name[0], random_name[1]));
+            path.push(format!(
+                "terminus-test-{:08x}{:08x}",
+                random_name[0], random_name[1]
+            ));
             std::fs::create_dir_all(&path)?;
             Ok(TempDir(path))
         }
@@ -379,12 +381,10 @@ mod tests {
 
         let export = store1
             .export_layers(Box::new(vec![base_name, child_name].into_iter()))
-            
             .unwrap();
 
         store2
             .import_layers(&export, Box::new(vec![base_name, child_name].into_iter()))
-            
             .unwrap();
 
         let imported_layer = store2.get_layer(child_name).unwrap().unwrap();

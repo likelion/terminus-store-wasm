@@ -425,7 +425,6 @@ mod tests {
 
         let base: Arc<InternalLayer> = Arc::new(
             BaseLayer::load_from_files([1, 2, 3, 4, 5], &files)
-                
                 .unwrap()
                 .into(),
         );
@@ -438,7 +437,6 @@ mod tests {
 
         let child: Arc<InternalLayer> = Arc::new(
             ChildLayer::load_from_files([5, 4, 3, 2, 1], base.clone(), &files)
-                
                 .unwrap()
                 .into(),
         );
@@ -481,7 +479,6 @@ mod tests {
 
         let base: Arc<InternalLayer> = Arc::new(
             BaseLayer::load_from_files([1, 2, 3, 4, 5], &files)
-                
                 .unwrap()
                 .into(),
         );
@@ -494,7 +491,6 @@ mod tests {
 
         let child: Arc<InternalLayer> = Arc::new(
             ChildLayer::load_from_files([5, 4, 3, 2, 1], base, &files)
-                
                 .unwrap()
                 .into(),
         );
@@ -507,7 +503,6 @@ mod tests {
 
         let child: Arc<InternalLayer> = Arc::new(
             ChildLayer::load_from_files([5, 4, 3, 2, 2], child, &files)
-                
                 .unwrap()
                 .into(),
         );
@@ -535,7 +530,6 @@ mod tests {
 
         let base: Arc<InternalLayer> = Arc::new(
             BaseLayer::load_from_files([1, 2, 3, 4, 5], &files)
-                
                 .unwrap()
                 .into(),
         );
@@ -548,7 +542,6 @@ mod tests {
 
         let child: Arc<InternalLayer> = Arc::new(
             ChildLayer::load_from_files([5, 4, 3, 2, 1], base, &files)
-                
                 .unwrap()
                 .into(),
         );
@@ -561,7 +554,6 @@ mod tests {
 
         let child: Arc<InternalLayer> = Arc::new(
             ChildLayer::load_from_files([5, 4, 3, 2, 2], child, &files)
-                
                 .unwrap()
                 .into(),
         );
@@ -632,7 +624,6 @@ mod tests {
 
         let base: Arc<InternalLayer> = Arc::new(
             BaseLayer::load_from_files([1, 2, 3, 4, 5], &files)
-                
                 .unwrap()
                 .into(),
         );

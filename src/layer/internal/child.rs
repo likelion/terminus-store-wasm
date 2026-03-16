@@ -12,7 +12,6 @@ use tdb_succinct_wasm::*;
 use std::io;
 use std::sync::Arc;
 
-
 /// A child layer.
 ///
 /// This layer type has a parent. It stores triple additions and removals.
@@ -207,16 +206,12 @@ pub struct ChildLayerFileBuilder<F: 'static + FileLoad + FileStore + Clone + Sen
 
 impl<F: 'static + FileLoad + FileStore + Clone + Send + Sync> ChildLayerFileBuilder<F> {
     /// Create the builder from the given files.
-    pub fn from_files(
-        parent: Arc<dyn Layer>,
-        files: &ChildLayerFiles<F>,
-    ) -> io::Result<Self> {
+    pub fn from_files(parent: Arc<dyn Layer>, files: &ChildLayerFiles<F>) -> io::Result<Self> {
         let builder = DictionarySetFileBuilder::from_files(
             files.node_dictionary_files.clone(),
             files.predicate_dictionary_files.clone(),
             files.value_dictionary_files.clone(),
-        )
-        ?;
+        )?;
 
         Ok(Self {
             parent,
@@ -342,16 +337,10 @@ impl<F: 'static + FileLoad + FileStore + Clone + Send + Sync> ChildLayerFileBuil
 
         let node_dict_offsets_map = files.node_dictionary_files.offsets_file.map()?;
         let node_dict_blocks_map = files.node_dictionary_files.blocks_file.map()?;
-        let predicate_dict_offsets_map =
-            files.predicate_dictionary_files.offsets_file.map()?;
+        let predicate_dict_offsets_map = files.predicate_dictionary_files.offsets_file.map()?;
         let predicate_dict_blocks_map = files.predicate_dictionary_files.blocks_file.map()?;
-        let value_dict_types_present_map = files
-            .value_dictionary_files
-            .types_present_file
-            .map()
-            ?;
-        let value_dict_type_offsets_map =
-            files.value_dictionary_files.type_offsets_file.map()?;
+        let value_dict_types_present_map = files.value_dictionary_files.types_present_file.map()?;
+        let value_dict_type_offsets_map = files.value_dictionary_files.type_offsets_file.map()?;
         let value_dict_offsets_map = files.value_dictionary_files.offsets_file.map()?;
         let value_dict_blocks_map = files.value_dictionary_files.blocks_file.map()?;
 
@@ -403,8 +392,7 @@ impl<F: 'static + FileLoad + FileStore + Clone + Send + Sync> ChildLayerFileBuil
             num_predicates + parent_counts.predicate_count,
             num_values + parent_counts.value_count,
             Some(files.pos_subjects_file.clone()),
-        )
-        ?;
+        )?;
 
         let neg_builder = TripleFileBuilder::new(
             files.neg_s_p_adjacency_list_files.clone(),
@@ -413,8 +401,7 @@ impl<F: 'static + FileLoad + FileStore + Clone + Send + Sync> ChildLayerFileBuil
             num_predicates + parent_counts.predicate_count,
             num_values + parent_counts.value_count,
             Some(files.neg_subjects_file.clone()),
-        )
-        ?;
+        )?;
 
         Ok(ChildLayerFileBuilderPhase2 {
             parent,
@@ -431,21 +418,14 @@ impl<F: 'static + FileLoad + FileStore + Clone + Send + Sync> ChildLayerFileBuil
         predicate: u64,
         object: u64,
     ) -> io::Result<()> {
-        self.pos_builder
-            .add_triple(subject, predicate, object)
-            
+        self.pos_builder.add_triple(subject, predicate, object)
     }
 
     /// Add the given subject, predicate and object.
     ///
     /// This will panic if a greater triple has already been added,
     /// and do nothing if the triple is already part of the parent.
-    pub fn add_triple(
-        &mut self,
-        subject: u64,
-        predicate: u64,
-        object: u64,
-    ) -> io::Result<()> {
+    pub fn add_triple(&mut self, subject: u64, predicate: u64, object: u64) -> io::Result<()> {
         if !self.parent.triple_exists(subject, predicate, object) {
             self.add_triple_unchecked(subject, predicate, object)
         } else {
@@ -459,24 +439,16 @@ impl<F: 'static + FileLoad + FileStore + Clone + Send + Sync> ChildLayerFileBuil
         predicate: u64,
         object: u64,
     ) -> io::Result<()> {
-        self.neg_builder
-            .add_triple(subject, predicate, object)
-            
+        self.neg_builder.add_triple(subject, predicate, object)
     }
 
     /// Remove the given subject, predicate and object.
     ///
     /// This will panic if a greater triple has already been removed,
     /// and do nothing if the parent doesn't know aobut this triple.
-    pub fn remove_triple(
-        &mut self,
-        subject: u64,
-        predicate: u64,
-        object: u64,
-    ) -> io::Result<()> {
+    pub fn remove_triple(&mut self, subject: u64, predicate: u64, object: u64) -> io::Result<()> {
         if self.parent.triple_exists(subject, predicate, object) {
             self.remove_triple_unchecked(subject, predicate, object)
-                
         } else {
             Ok(())
         }
@@ -496,8 +468,7 @@ impl<F: 'static + FileLoad + FileStore + Clone + Send + Sync> ChildLayerFileBuil
             .collect();
 
         for triple in filtered {
-            self.add_triple_unchecked(triple.subject, triple.predicate, triple.object)
-                ?;
+            self.add_triple_unchecked(triple.subject, triple.predicate, triple.object)?;
         }
 
         Ok(())
@@ -517,8 +488,7 @@ impl<F: 'static + FileLoad + FileStore + Clone + Send + Sync> ChildLayerFileBuil
             .collect();
 
         for triple in filtered {
-            self.remove_triple_unchecked(triple.subject, triple.predicate, triple.object)
-                ?;
+            self.remove_triple_unchecked(triple.subject, triple.predicate, triple.object)?;
         }
 
         Ok(())
@@ -571,15 +541,13 @@ pub mod child_tests {
 
         let child_files = child_layer_files();
 
-        let child_builder = ChildLayerFileBuilder::from_files(parent.clone(), &child_files)
-            
-            .unwrap();
+        let child_builder =
+            ChildLayerFileBuilder::from_files(parent.clone(), &child_files).unwrap();
         let builder = child_builder.into_phase2().unwrap();
         builder.finalize().unwrap();
 
-        let child_layer = ChildLayer::load_from_files([5, 4, 3, 2, 1], parent, &child_files)
-            
-            .unwrap();
+        let child_layer =
+            ChildLayer::load_from_files([5, 4, 3, 2, 1], parent, &child_files).unwrap();
 
         assert!(child_layer.triple_exists(1, 1, 1));
         assert!(child_layer.triple_exists(2, 1, 1));
@@ -600,17 +568,15 @@ pub mod child_tests {
 
         let child_files = child_layer_files();
 
-        let child_builder = ChildLayerFileBuilder::from_files(parent.clone(), &child_files)
-            
-            .unwrap();
+        let child_builder =
+            ChildLayerFileBuilder::from_files(parent.clone(), &child_files).unwrap();
         let mut b = child_builder.into_phase2().unwrap();
         b.add_triple(2, 1, 2).unwrap();
         b.add_triple(3, 3, 3).unwrap();
         b.finalize().unwrap();
 
-        let child_layer = ChildLayer::load_from_files([5, 4, 3, 2, 1], parent, &child_files)
-            
-            .unwrap();
+        let child_layer =
+            ChildLayer::load_from_files([5, 4, 3, 2, 1], parent, &child_files).unwrap();
 
         assert!(child_layer.triple_exists(1, 1, 1));
         assert!(child_layer.triple_exists(2, 1, 1));
@@ -633,17 +599,15 @@ pub mod child_tests {
 
         let child_files = child_layer_files();
 
-        let child_builder = ChildLayerFileBuilder::from_files(parent.clone(), &child_files)
-            
-            .unwrap();
+        let child_builder =
+            ChildLayerFileBuilder::from_files(parent.clone(), &child_files).unwrap();
         let mut b = child_builder.into_phase2().unwrap();
         b.remove_triple(2, 1, 1).unwrap();
         b.remove_triple(3, 2, 5).unwrap();
         b.finalize().unwrap();
 
-        let child_layer = ChildLayer::load_from_files([5, 4, 3, 2, 1], parent, &child_files)
-            
-            .unwrap();
+        let child_layer =
+            ChildLayer::load_from_files([5, 4, 3, 2, 1], parent, &child_files).unwrap();
 
         assert!(child_layer.triple_exists(1, 1, 1));
         assert!(!child_layer.triple_exists(2, 1, 1));
@@ -663,18 +627,16 @@ pub mod child_tests {
 
         let child_files = child_layer_files();
 
-        let child_builder = ChildLayerFileBuilder::from_files(parent.clone(), &child_files)
-            
-            .unwrap();
+        let child_builder =
+            ChildLayerFileBuilder::from_files(parent.clone(), &child_files).unwrap();
         let mut b = child_builder.into_phase2().unwrap();
         b.add_triple(1, 2, 3).unwrap();
         b.add_triple(2, 3, 4).unwrap();
         b.remove_triple(3, 2, 5).unwrap();
         b.finalize().unwrap();
 
-        let child_layer = ChildLayer::load_from_files([5, 4, 3, 2, 1], parent, &child_files)
-            
-            .unwrap();
+        let child_layer =
+            ChildLayer::load_from_files([5, 4, 3, 2, 1], parent, &child_files).unwrap();
 
         assert!(child_layer.triple_exists(1, 1, 1));
         assert!(child_layer.triple_exists(1, 2, 3));
@@ -696,18 +658,16 @@ pub mod child_tests {
 
         let child_files = child_layer_files();
 
-        let child_builder = ChildLayerFileBuilder::from_files(parent.clone(), &child_files)
-            
-            .unwrap();
+        let child_builder =
+            ChildLayerFileBuilder::from_files(parent.clone(), &child_files).unwrap();
         let mut b = child_builder.into_phase2().unwrap();
         b.add_triple(1, 2, 3).unwrap();
         b.add_triple(2, 3, 4).unwrap();
         b.remove_triple(3, 2, 5).unwrap();
         b.finalize().unwrap();
 
-        let child_layer = ChildLayer::load_from_files([5, 4, 3, 2, 1], parent, &child_files)
-            
-            .unwrap();
+        let child_layer =
+            ChildLayer::load_from_files([5, 4, 3, 2, 1], parent, &child_files).unwrap();
 
         let subjects: Vec<_> = child_layer
             .triples()
@@ -736,18 +696,16 @@ pub mod child_tests {
 
         let child_files = child_layer_files();
 
-        let child_builder = ChildLayerFileBuilder::from_files(parent.clone(), &child_files)
-            
-            .unwrap();
+        let child_builder =
+            ChildLayerFileBuilder::from_files(parent.clone(), &child_files).unwrap();
         let mut b = child_builder.into_phase2().unwrap();
         b.add_triple(1, 2, 3).unwrap();
         b.add_triple(2, 3, 4).unwrap();
         b.remove_triple(3, 2, 5).unwrap();
         b.finalize().unwrap();
 
-        let child_layer = ChildLayer::load_from_files([5, 4, 3, 2, 1], parent, &child_files)
-            
-            .unwrap();
+        let child_layer =
+            ChildLayer::load_from_files([5, 4, 3, 2, 1], parent, &child_files).unwrap();
 
         let pairs: Vec<_> = child_layer
             .triples_p(1)
@@ -780,17 +738,15 @@ pub mod child_tests {
 
         let child_files = child_layer_files();
 
-        let child_builder = ChildLayerFileBuilder::from_files(parent.clone(), &child_files)
-            
-            .unwrap();
+        let child_builder =
+            ChildLayerFileBuilder::from_files(parent.clone(), &child_files).unwrap();
         let mut b = child_builder.into_phase2().unwrap();
         b.add_triple(11, 2, 3).unwrap();
         b.add_triple(12, 3, 4).unwrap();
         b.finalize().unwrap();
 
-        let child_layer = ChildLayer::load_from_files([5, 4, 3, 2, 1], parent, &child_files)
-            
-            .unwrap();
+        let child_layer =
+            ChildLayer::load_from_files([5, 4, 3, 2, 1], parent, &child_files).unwrap();
 
         assert!(child_layer.triple_exists(11, 2, 3));
         assert!(child_layer.triple_exists(12, 3, 4));
@@ -803,9 +759,7 @@ pub mod child_tests {
 
         let child_files = child_layer_files();
 
-        let mut b = ChildLayerFileBuilder::from_files(parent.clone(), &child_files)
-            
-            .unwrap();
+        let mut b = ChildLayerFileBuilder::from_files(parent.clone(), &child_files).unwrap();
         b.add_node("foo");
         b.add_predicate("bar");
         b.add_value(String::make_entry(&"baz"));
@@ -813,9 +767,8 @@ pub mod child_tests {
         let b = b.into_phase2().unwrap();
         b.finalize().unwrap();
 
-        let child_layer = ChildLayer::load_from_files([5, 4, 3, 2, 1], parent, &child_files)
-            
-            .unwrap();
+        let child_layer =
+            ChildLayer::load_from_files([5, 4, 3, 2, 1], parent, &child_files).unwrap();
 
         assert_eq!(3, child_layer.subject_id("bbbbb").unwrap());
         assert_eq!(2, child_layer.predicate_id("fghij").unwrap());
@@ -846,9 +799,7 @@ pub mod child_tests {
 
         let child_files = child_layer_files();
 
-        let mut b = ChildLayerFileBuilder::from_files(parent.clone(), &child_files)
-            
-            .unwrap();
+        let mut b = ChildLayerFileBuilder::from_files(parent.clone(), &child_files).unwrap();
         b.add_node("foo");
         b.add_predicate("bar");
         b.add_value(String::make_entry(&"baz"));
@@ -856,9 +807,8 @@ pub mod child_tests {
 
         b.finalize().unwrap();
 
-        let child_layer = ChildLayer::load_from_files([5, 4, 3, 2, 1], parent, &child_files)
-            
-            .unwrap();
+        let child_layer =
+            ChildLayer::load_from_files([5, 4, 3, 2, 1], parent, &child_files).unwrap();
 
         assert_eq!(11, child_layer.subject_id("foo").unwrap());
         assert_eq!(5, child_layer.predicate_id("bar").unwrap());
@@ -889,9 +839,8 @@ pub mod child_tests {
 
         let child_files = child_layer_files();
 
-        let child_builder = ChildLayerFileBuilder::from_files(parent.clone(), &child_files)
-            
-            .unwrap();
+        let child_builder =
+            ChildLayerFileBuilder::from_files(parent.clone(), &child_files).unwrap();
         let mut b = child_builder.into_phase2().unwrap();
         b.add_triple(1, 3, 4).unwrap();
         b.add_triple(2, 2, 2).unwrap();
@@ -899,9 +848,8 @@ pub mod child_tests {
         b.remove_triple(3, 2, 5).unwrap();
         b.finalize().unwrap();
 
-        let child_layer = ChildLayer::load_from_files([5, 4, 3, 2, 1], parent, &child_files)
-            
-            .unwrap();
+        let child_layer =
+            ChildLayer::load_from_files([5, 4, 3, 2, 1], parent, &child_files).unwrap();
 
         let result: Vec<_> = child_layer
             .internal_triple_additions()
@@ -918,9 +866,8 @@ pub mod child_tests {
 
         let child_files = child_layer_files();
 
-        let child_builder = ChildLayerFileBuilder::from_files(parent.clone(), &child_files)
-            
-            .unwrap();
+        let child_builder =
+            ChildLayerFileBuilder::from_files(parent.clone(), &child_files).unwrap();
         let mut b = child_builder.into_phase2().unwrap();
         b.add_triple(1, 3, 4).unwrap();
         b.remove_triple(2, 1, 1).unwrap();
@@ -928,9 +875,8 @@ pub mod child_tests {
         b.remove_triple(4, 3, 6).unwrap();
         b.finalize().unwrap();
 
-        let child_layer = ChildLayer::load_from_files([5, 4, 3, 2, 1], parent, &child_files)
-            
-            .unwrap();
+        let child_layer =
+            ChildLayer::load_from_files([5, 4, 3, 2, 1], parent, &child_files).unwrap();
 
         let result: Vec<_> = child_layer
             .internal_triple_removals()
@@ -947,9 +893,8 @@ pub mod child_tests {
 
         let child_files = child_layer_files();
 
-        let child_builder = ChildLayerFileBuilder::from_files(parent.clone(), &child_files)
-            
-            .unwrap();
+        let child_builder =
+            ChildLayerFileBuilder::from_files(parent.clone(), &child_files).unwrap();
         let mut b = child_builder.into_phase2().unwrap();
         b.add_triple(1, 3, 4).unwrap();
         b.remove_triple(2, 1, 1).unwrap();
@@ -958,9 +903,7 @@ pub mod child_tests {
         b.finalize().unwrap();
 
         let child_layer =
-            ChildLayer::load_from_files([5, 4, 3, 2, 1], parent.clone(), &child_files)
-                
-                .unwrap();
+            ChildLayer::load_from_files([5, 4, 3, 2, 1], parent.clone(), &child_files).unwrap();
 
         assert_eq!(
             parent.node_and_value_count(),
@@ -972,67 +915,12 @@ pub mod child_tests {
     #[test]
     // Note: stream_child_triples test removed - open_child_triple_stream no longer exists
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
     fn count_triples() {
         let base_layer = example_base_layer();
         let parent: Arc<InternalLayer> = Arc::new(base_layer.into());
 
         let child_files = child_layer_files();
-        let builder = ChildLayerFileBuilder::from_files(parent.clone(), &child_files)
-            
-            .unwrap();
+        let builder = ChildLayerFileBuilder::from_files(parent.clone(), &child_files).unwrap();
 
         let mut b = builder.into_phase2().unwrap();
         b.add_triple(1, 2, 1).unwrap();
@@ -1046,9 +934,8 @@ pub mod child_tests {
         b.remove_triple(4, 3, 6).unwrap();
         b.finalize().unwrap();
 
-        let child_layer = ChildLayer::load_from_files([5, 4, 3, 2, 1], parent, &child_files)
-            
-            .unwrap();
+        let child_layer =
+            ChildLayer::load_from_files([5, 4, 3, 2, 1], parent, &child_files).unwrap();
 
         assert_eq!(6, child_layer.internal_triple_layer_addition_count());
         assert_eq!(3, child_layer.internal_triple_layer_removal_count());

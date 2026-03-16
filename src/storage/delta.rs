@@ -13,9 +13,7 @@ fn safe_upto_bound<S: LayerStore>(
     if layer.name() == upto {
         return Ok(upto);
     }
-    let mut disk_layer_names = store
-        .retrieve_layer_stack_names_upto(layer.name(), upto)
-        ?;
+    let mut disk_layer_names = store.retrieve_layer_stack_names_upto(layer.name(), upto)?;
 
     let mut l = &*layer;
     loop {
@@ -52,8 +50,7 @@ fn get_node_dicts_from_disk<S: LayerStore>(
     let mut result = Vec::new();
     walk_backwards_from_disk_upto!(store, name, upto, current, {
         let dict = store
-            .get_node_dictionary(current)
-            ?
+            .get_node_dictionary(current)?
             .expect("expected dictionary to exist");
         result.push(dict);
     });
@@ -71,8 +68,7 @@ fn get_predicate_dicts_from_disk<S: LayerStore>(
     let mut result = Vec::new();
     walk_backwards_from_disk_upto!(store, name, upto, current, {
         let dict = store
-            .get_predicate_dictionary(current)
-            ?
+            .get_predicate_dictionary(current)?
             .expect("expected dictionary to exist");
         result.push(dict);
     });
@@ -90,8 +86,7 @@ fn get_value_dicts_from_disk<S: LayerStore>(
     let mut result = Vec::new();
     walk_backwards_from_disk_upto!(store, name, upto, current, {
         let dict = store
-            .get_value_dictionary(current)
-            ?
+            .get_value_dictionary(current)?
             .expect("expected dictionary to exist");
         result.push(dict);
     });
@@ -109,8 +104,7 @@ fn get_node_value_idmaps_from_disk<S: LayerStore>(
     let mut result = Vec::new();
     walk_backwards_from_disk_upto!(store, name, upto, current, {
         let dict = store
-            .get_node_value_idmap(current)
-            ?
+            .get_node_value_idmap(current)?
             .expect("expected idmap to be retrievable");
         result.push(dict);
     });
@@ -128,8 +122,7 @@ fn get_predicate_idmaps_from_disk<S: LayerStore>(
     let mut result = Vec::new();
     walk_backwards_from_disk_upto!(store, name, upto, current, {
         let dict = store
-            .get_predicate_idmap(current)
-            ?
+            .get_predicate_idmap(current)?
             .expect("expected idmap to be retrievable");
         result.push(dict);
     });
@@ -203,8 +196,7 @@ fn dictionary_rollup_upto<S: LayerStore, F: 'static + FileLoad + FileStore>(
     merge_string_dictionaries(
         predicate_dicts.iter(),
         files.predicate_dictionary_files.clone(),
-    )
-    ?;
+    )?;
     merge_typed_dictionaries(value_dicts.iter(), files.value_dictionary_files.clone())?;
 
     construct_idmaps_from_structures(
@@ -215,7 +207,6 @@ fn dictionary_rollup_upto<S: LayerStore, F: 'static + FileLoad + FileStore>(
         &predicate_idmaps,
         files.id_map_files.clone(),
     )
-    
 }
 
 pub fn dictionary_rollup<F: 'static + FileLoad + FileStore>(
@@ -282,8 +273,7 @@ pub fn delta_rollup<F: 'static + FileLoad + FileStore>(
         counts.predicate_count,
         counts.value_count,
         None,
-    )
-    ?;
+    )?;
 
     builder.add_id_triples(layer.triples())?;
     builder.finalize()?;
@@ -295,7 +285,6 @@ pub fn delta_rollup<F: 'static + FileLoad + FileStore>(
         None,
         files.predicate_wavelet_tree_files.clone(),
     )
-    
 }
 
 pub fn imprecise_delta_rollup_upto<S: LayerStore, F: 'static + FileLoad + FileStore>(
@@ -316,8 +305,7 @@ pub fn imprecise_delta_rollup_upto<S: LayerStore, F: 'static + FileLoad + FileSt
         counts.predicate_count,
         counts.value_count,
         Some(files.pos_subjects_file),
-    )
-    ?;
+    )?;
 
     let mut neg_builder = TripleFileBuilder::new(
         files.neg_s_p_adjacency_list_files.clone(),
@@ -326,8 +314,7 @@ pub fn imprecise_delta_rollup_upto<S: LayerStore, F: 'static + FileLoad + FileSt
         counts.predicate_count,
         counts.value_count,
         Some(files.neg_subjects_file),
-    )
-    ?;
+    )?;
 
     let additions = InternalTripleStackIterator::from_layer_stack(layer, bound)
         .expect("bound not found")
@@ -351,8 +338,7 @@ pub fn imprecise_delta_rollup_upto<S: LayerStore, F: 'static + FileLoad + FileSt
         files.pos_o_ps_adjacency_list_files.clone(),
         Some(files.pos_objects_file.clone()),
         files.pos_predicate_wavelet_tree_files.clone(),
-    )
-    ?;
+    )?;
 
     build_indexes(
         files.neg_s_p_adjacency_list_files.clone(),
@@ -361,7 +347,6 @@ pub fn imprecise_delta_rollup_upto<S: LayerStore, F: 'static + FileLoad + FileSt
         Some(files.neg_objects_file.clone()),
         files.neg_predicate_wavelet_tree_files.clone(),
     )
-    
 }
 
 pub fn delta_rollup_upto<S: LayerStore, F: 'static + FileLoad + FileStore>(
@@ -382,8 +367,7 @@ pub fn delta_rollup_upto<S: LayerStore, F: 'static + FileLoad + FileStore>(
         counts.predicate_count,
         counts.value_count,
         Some(files.pos_subjects_file),
-    )
-    ?;
+    )?;
 
     let mut neg_builder = TripleFileBuilder::new(
         files.neg_s_p_adjacency_list_files.clone(),
@@ -392,8 +376,7 @@ pub fn delta_rollup_upto<S: LayerStore, F: 'static + FileLoad + FileStore>(
         counts.predicate_count,
         counts.value_count,
         Some(files.neg_subjects_file),
-    )
-    ?;
+    )?;
 
     let disk_changes = store.layer_changes_upto(bound, upto)?;
     let memory_changes =
@@ -420,8 +403,7 @@ pub fn delta_rollup_upto<S: LayerStore, F: 'static + FileLoad + FileStore>(
         files.pos_o_ps_adjacency_list_files.clone(),
         Some(files.pos_objects_file.clone()),
         files.pos_predicate_wavelet_tree_files.clone(),
-    )
-    ?;
+    )?;
 
     build_indexes(
         files.neg_s_p_adjacency_list_files.clone(),
@@ -430,7 +412,6 @@ pub fn delta_rollup_upto<S: LayerStore, F: 'static + FileLoad + FileStore>(
         Some(files.neg_objects_file.clone()),
         files.neg_predicate_wavelet_tree_files.clone(),
     )
-    
 }
 
 #[cfg(test)]
@@ -484,7 +465,6 @@ mod tests {
 
         let delta_layer: Arc<InternalLayer> = Arc::new(
             BaseLayer::load_from_files([0, 0, 0, 0, 4], &delta_files)
-                
                 .unwrap()
                 .into(),
         );
@@ -514,13 +494,10 @@ mod tests {
         let base_name = Layer::name(&*base_layer);
 
         let delta_files = child_layer_memory_files();
-        delta_rollup_upto(&store, &child_layer, base_name, delta_files.clone())
-            
-            .unwrap();
+        delta_rollup_upto(&store, &child_layer, base_name, delta_files.clone()).unwrap();
 
         let delta_layer: Arc<InternalLayer> = Arc::new(
             ChildLayer::load_from_files([0, 0, 0, 0, 4], base_layer, &delta_files)
-                
                 .unwrap()
                 .into(),
         );
@@ -566,24 +543,19 @@ mod tests {
             Layer::name(&*base_layer),
             delta1_files.clone(),
         )
-        
         .unwrap();
 
         let delta_layer1: Arc<InternalLayer> = Arc::new(
             ChildLayer::load_from_files([0, 0, 0, 0, 4], base_layer, &delta1_files)
-                
                 .unwrap()
                 .into(),
         );
 
         let delta2_files = base_layer_memory_files();
-        delta_rollup(&delta_layer1, delta2_files.clone())
-            
-            .unwrap();
+        delta_rollup(&delta_layer1, delta2_files.clone()).unwrap();
 
         let delta_layer2: Arc<InternalLayer> = Arc::new(
             BaseLayer::load_from_files([0, 0, 0, 0, 5], &delta2_files)
-                
                 .unwrap()
                 .into(),
         );
@@ -667,15 +639,10 @@ mod tests {
 
         let layer = store.get_layer(stack[5]).unwrap().unwrap();
 
-        store
-            .clone()
-            .rollup_upto(layer.clone(), stack[2])
-            
-            .unwrap();
+        store.clone().rollup_upto(layer.clone(), stack[2]).unwrap();
         let first = Layer::name(
             store
                 .get_layer(stack[5])
-                
                 .unwrap()
                 .unwrap()
                 .immediate_parent()
@@ -685,12 +652,10 @@ mod tests {
         store
             .clone()
             .imprecise_rollup_upto(layer, stack[2])
-            
             .unwrap();
         let second = Layer::name(
             store
                 .get_layer(stack[5])
-                
                 .unwrap()
                 .unwrap()
                 .immediate_parent()
@@ -711,15 +676,10 @@ mod tests {
 
         let layer = store.get_layer(stack[5]).unwrap().unwrap();
 
-        store
-            .clone()
-            .rollup_upto(layer.clone(), stack[2])
-            
-            .unwrap();
+        store.clone().rollup_upto(layer.clone(), stack[2]).unwrap();
         let first = Layer::name(
             store
                 .get_layer(stack[5])
-                
                 .unwrap()
                 .unwrap()
                 .immediate_parent()
@@ -729,12 +689,10 @@ mod tests {
         store
             .clone()
             .imprecise_rollup_upto(layer, stack[2])
-            
             .unwrap();
         let second = Layer::name(
             store
                 .get_layer(stack[5])
-                
                 .unwrap()
                 .unwrap()
                 .immediate_parent()
@@ -754,15 +712,10 @@ mod tests {
 
         let layer = store.get_layer(stack[5]).unwrap().unwrap();
 
-        store
-            .clone()
-            .rollup_upto(layer.clone(), stack[2])
-            
-            .unwrap();
+        store.clone().rollup_upto(layer.clone(), stack[2]).unwrap();
         let first = Layer::name(
             store
                 .get_layer(stack[5])
-                
                 .unwrap()
                 .unwrap()
                 .immediate_parent()
@@ -772,12 +725,10 @@ mod tests {
         store
             .clone()
             .imprecise_rollup_upto(layer, stack[2])
-            
             .unwrap();
         let second = Layer::name(
             store
                 .get_layer(stack[5])
-                
                 .unwrap()
                 .unwrap()
                 .immediate_parent()
@@ -802,11 +753,7 @@ mod tests {
             .collect();
         assert_eq!(14, original_triples.len());
 
-        store
-            .clone()
-            .rollup_upto(layer.clone(), stack[2])
-            
-            .unwrap();
+        store.clone().rollup_upto(layer.clone(), stack[2]).unwrap();
         let rollup = store.get_layer(stack[5]).unwrap().unwrap();
 
         let new_triples: Vec<_> = rollup

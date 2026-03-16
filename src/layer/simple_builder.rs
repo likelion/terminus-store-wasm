@@ -16,7 +16,6 @@ use std::collections::HashMap;
 use std::io;
 use std::sync::Arc;
 
-
 use bitvec::prelude::*;
 
 /// A layer builder trait with no generic typing.
@@ -383,8 +382,7 @@ impl<F: 'static + FileLoad + FileStore + Clone> LayerBuilder for SimpleLayerBuil
         match parent {
             Some(parent) => {
                 let files = files.into_child();
-                let mut builder =
-                    ChildLayerFileBuilder::from_files(parent.clone(), &files)?;
+                let mut builder = ChildLayerFileBuilder::from_files(parent.clone(), &files)?;
 
                 builder.add_nodes(nodes.into_iter().map(|x| x.0));
                 builder.add_predicates(predicates.into_iter().map(|x| x.0));
@@ -505,7 +503,6 @@ mod tests {
         builder.commit().unwrap();
         let layer2: Arc<InternalLayer> = Arc::new(
             ChildLayer::load_from_files(name2, base_layer, &files2)
-                
                 .unwrap()
                 .into(),
         );
@@ -520,7 +517,6 @@ mod tests {
         builder.commit().unwrap();
         let layer3: Arc<InternalLayer> = Arc::new(
             ChildLayer::load_from_files(name3, layer2, &files3)
-                
                 .unwrap()
                 .into(),
         );
@@ -533,7 +529,6 @@ mod tests {
         builder.commit().unwrap();
         let layer4: Arc<InternalLayer> = Arc::new(
             ChildLayer::load_from_files(name4, layer3, &files4)
-                
                 .unwrap()
                 .into(),
         );
@@ -560,12 +555,8 @@ mod tests {
         builder.add_value_triple(ValueTriple::new_string_value("crow", "says", "caw"));
 
         builder.commit().unwrap();
-        let base_layer: Arc<InternalLayer> = Arc::new(
-            BaseLayer::load_from_files(name, &files)
-                
-                .unwrap()
-                .into(),
-        );
+        let base_layer: Arc<InternalLayer> =
+            Arc::new(BaseLayer::load_from_files(name, &files).unwrap().into());
 
         assert!(
             !base_layer.value_triple_exists(&ValueTriple::new_string_value("crow", "says", "caw"))
@@ -582,12 +573,8 @@ mod tests {
         builder.remove_value_triple(ValueTriple::new_string_value("crow", "says", "caw"));
 
         builder.commit().unwrap();
-        let base_layer: Arc<InternalLayer> = Arc::new(
-            BaseLayer::load_from_files(name, &files)
-                
-                .unwrap()
-                .into(),
-        );
+        let base_layer: Arc<InternalLayer> =
+            Arc::new(BaseLayer::load_from_files(name, &files).unwrap().into());
 
         assert!(
             !base_layer.value_triple_exists(&ValueTriple::new_string_value("crow", "says", "caw"))
@@ -607,7 +594,6 @@ mod tests {
         builder.commit().unwrap();
         let child_layer: Arc<InternalLayer> = Arc::new(
             ChildLayer::load_from_files(name, base_layer, &files)
-                
                 .unwrap()
                 .into(),
         );
@@ -630,7 +616,6 @@ mod tests {
         builder.commit().unwrap();
         let child_layer: Arc<InternalLayer> = Arc::new(
             ChildLayer::load_from_files(name, base_layer, &files)
-                
                 .unwrap()
                 .into(),
         );
@@ -653,7 +638,6 @@ mod tests {
         builder.commit().unwrap();
         let child_layer: Arc<InternalLayer> = Arc::new(
             ChildLayer::load_from_files(name, base_layer, &files)
-                
                 .unwrap()
                 .into(),
         );
@@ -676,7 +660,6 @@ mod tests {
         builder.commit().unwrap();
         let child_layer: Arc<InternalLayer> = Arc::new(
             ChildLayer::load_from_files(name, base_layer, &files)
-                
                 .unwrap()
                 .into(),
         );
@@ -704,7 +687,6 @@ mod tests {
         builder.commit().unwrap();
         let child_layer: Arc<InternalLayer> = Arc::new(
             ChildLayer::load_from_files(name, base_layer, &files)
-                
                 .unwrap()
                 .into(),
         );
@@ -732,7 +714,6 @@ mod tests {
         builder.commit().unwrap();
         let child_layer: Arc<InternalLayer> = Arc::new(
             ChildLayer::load_from_files(name, base_layer, &files)
-                
                 .unwrap()
                 .into(),
         );
@@ -760,7 +741,6 @@ mod tests {
         builder.commit().unwrap();
         let child_layer: Arc<InternalLayer> = Arc::new(
             ChildLayer::load_from_files(name, base_layer, &files)
-                
                 .unwrap()
                 .into(),
         );
@@ -788,7 +768,6 @@ mod tests {
         builder.commit().unwrap();
         let child_layer: Arc<InternalLayer> = Arc::new(
             ChildLayer::load_from_files(name, base_layer, &files)
-                
                 .unwrap()
                 .into(),
         );

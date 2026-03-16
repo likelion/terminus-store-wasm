@@ -35,11 +35,11 @@ mod layer;
 pub mod archive;
 mod copy;
 pub mod delta;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod fs_persistence;
 mod locking;
 pub mod memory;
 pub mod memory_persistence;
-#[cfg(not(target_arch = "wasm32"))]
-pub mod fs_persistence;
 #[cfg(target_arch = "wasm32")]
 pub mod opfs_persistence;
 pub mod pack;
@@ -49,11 +49,11 @@ pub mod persistence_store;
 pub use cache::*;
 pub use delta::*;
 pub use file::*;
+#[cfg(not(target_arch = "wasm32"))]
+pub use fs_persistence::*;
 pub use label::*;
 pub use layer::*;
 pub use memory_persistence::*;
-#[cfg(not(target_arch = "wasm32"))]
-pub use fs_persistence::*;
 #[cfg(target_arch = "wasm32")]
 pub use opfs_persistence::*;
 pub use pack::*;

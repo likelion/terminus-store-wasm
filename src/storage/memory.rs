@@ -4,7 +4,6 @@ use std::collections::HashMap;
 use std::io;
 use std::sync::{Arc, RwLock};
 
-
 use super::file::*;
 use super::label::*;
 use super::layer::*;
@@ -323,12 +322,7 @@ mod tests {
         w.write_all(&[1, 2, 3]).unwrap();
         w.sync_all().unwrap();
         let mut buf = Vec::new();
-        file.open_read()
-            
-            .unwrap()
-            .read_to_end(&mut buf)
-            
-            .unwrap();
+        file.open_read().unwrap().read_to_end(&mut buf).unwrap();
 
         assert_eq!(vec![1, 2, 3], buf);
     }
@@ -387,7 +381,6 @@ mod tests {
             1,
             store
                 .set_label(&foo, [6, 7, 8, 9, 10])
-                
                 .unwrap()
                 .unwrap()
                 .version
@@ -401,16 +394,8 @@ mod tests {
         let store = MemoryLabelStore::new();
         let foo = store.create_label("foo").unwrap();
 
-        assert!(store
-            .set_label(&foo, [6, 7, 8, 9, 10])
-            
-            .unwrap()
-            .is_some());
-        assert!(store
-            .set_label(&foo, [1, 1, 1, 1, 1])
-            
-            .unwrap()
-            .is_none());
+        assert!(store.set_label(&foo, [6, 7, 8, 9, 10]).unwrap().is_some());
+        assert!(store.set_label(&foo, [1, 1, 1, 1, 1]).unwrap().is_none());
     }
 
     #[test]
@@ -418,16 +403,8 @@ mod tests {
         let store = MemoryLabelStore::new();
         let foo = store.create_label("foo").unwrap();
 
-        let foo2 = store
-            .set_label(&foo, [6, 7, 8, 9, 10])
-            
-            .unwrap()
-            .unwrap();
-        assert!(store
-            .set_label(&foo2, [1, 1, 1, 1, 1])
-            
-            .unwrap()
-            .is_some());
+        let foo2 = store.set_label(&foo, [6, 7, 8, 9, 10]).unwrap().unwrap();
+        assert!(store.set_label(&foo2, [1, 1, 1, 1, 1]).unwrap().is_some());
     }
 
     #[test]

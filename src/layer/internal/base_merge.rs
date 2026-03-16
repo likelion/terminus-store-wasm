@@ -1,14 +1,6 @@
-use std::{
-    io,
-    path::Path,
-};
+use std::{io, path::Path};
 
-use crate::{
-    storage::{
-        BaseLayerFiles,
-        FileLoad, FileStore,
-    },
-};
+use crate::storage::{BaseLayerFiles, FileLoad, FileStore};
 
 #[allow(dead_code)]
 fn map_triple(

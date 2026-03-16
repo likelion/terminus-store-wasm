@@ -290,11 +290,11 @@ impl<P: 'static + LabelPersistence + Send + Sync> LabelStore for PersistenceLabe
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::storage::memory_persistence::MemoryPersistence;
-    use crate::storage::cache::LockingHashMapLayerCache;
-    use crate::storage::cache::CachedLayerStore;
-    use crate::storage::layer::LayerStore as LayerStoreTrait;
     use crate::layer::{Layer, SimpleLayerBuilder, ValueTriple};
+    use crate::storage::cache::CachedLayerStore;
+    use crate::storage::cache::LockingHashMapLayerCache;
+    use crate::storage::layer::LayerStore as LayerStoreTrait;
+    use crate::storage::memory_persistence::MemoryPersistence;
 
     #[test]
     fn persistence_layer_store_create_base_layer() {
@@ -601,8 +601,9 @@ mod tests {
             .unwrap();
 
         let imported = store2.get_layer(base_name).unwrap().unwrap();
-        assert!(imported
-            .value_triple_exists(&ValueTriple::new_string_value("alice", "name", "Alice")));
+        assert!(
+            imported.value_triple_exists(&ValueTriple::new_string_value("alice", "name", "Alice"))
+        );
         assert!(imported.value_triple_exists(&ValueTriple::new_node("alice", "knows", "bob")));
     }
 
@@ -729,14 +730,22 @@ mod tests {
 
         // Verify round-trip: string → id → string for subjects and predicates
         for &s in &subjects {
-            let id = layer.subject_id(s).expect(&format!("subject '{}' should have an id", s));
-            let back = layer.id_subject(id).expect(&format!("id {} should resolve to subject", id));
+            let id = layer
+                .subject_id(s)
+                .expect(&format!("subject '{}' should have an id", s));
+            let back = layer
+                .id_subject(id)
+                .expect(&format!("id {} should resolve to subject", id));
             assert_eq!(s, back, "subject round-trip failed for '{}'", s);
         }
 
         for &p in &predicates {
-            let id = layer.predicate_id(p).expect(&format!("predicate '{}' should have an id", p));
-            let back = layer.id_predicate(id).expect(&format!("id {} should resolve to predicate", id));
+            let id = layer
+                .predicate_id(p)
+                .expect(&format!("predicate '{}' should have an id", p));
+            let back = layer
+                .id_predicate(id)
+                .expect(&format!("id {} should resolve to predicate", id));
             assert_eq!(p, back, "predicate round-trip failed for '{}'", p);
         }
 
@@ -751,7 +760,9 @@ mod tests {
             assert!(
                 triples.contains(&expected),
                 "triple ({}, {}, {}) should be retrievable",
-                subjects[i], predicates[i], objects[i]
+                subjects[i],
+                predicates[i],
+                objects[i]
             );
         }
 
@@ -865,7 +876,9 @@ mod tests {
             layer: None,
             version: 999, // wrong version
         };
-        let result = persistence.set_label(&stale_label, Some([1, 2, 3, 4, 5])).unwrap();
+        let result = persistence
+            .set_label(&stale_label, Some([1, 2, 3, 4, 5]))
+            .unwrap();
         assert!(
             result.is_none(),
             "set_label with stale version should return None"

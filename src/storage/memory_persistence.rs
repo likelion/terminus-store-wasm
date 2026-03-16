@@ -4,7 +4,7 @@ use std::io;
 use std::sync::{Arc, RwLock};
 
 use super::label::Label;
-use super::persistence::{LayerId, LayerPersistence, LabelPersistence};
+use super::persistence::{LabelPersistence, LayerId, LayerPersistence};
 
 /// In-memory persistence backend.
 /// Available on all targets (no #[cfg] gate).

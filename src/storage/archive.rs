@@ -20,7 +20,7 @@ use std::os::windows::fs::MetadataExt;
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use lru::LruCache;
 use std::fs::{self, File};
-use std::io::{Read, Write, Seek};
+use std::io::{Read, Seek, Write};
 
 use tdb_succinct_wasm::{
     logarray_length_from_control_word, smallbitarray::SmallBitArray, LateLogArrayBufBuilder,
@@ -55,11 +55,8 @@ pub trait ArchiveMetadataBackend: Clone + Send + Sync {
     fn layer_exists(&self, id: [u32; 5]) -> io::Result<bool>;
     fn layer_size(&self, id: [u32; 5]) -> io::Result<u64>;
     fn layer_file_exists(&self, id: [u32; 5], file_type: LayerFileEnum) -> io::Result<bool>;
-    fn get_layer_structure_size(
-        &self,
-        id: [u32; 5],
-        file_type: LayerFileEnum,
-    ) -> io::Result<usize>;
+    fn get_layer_structure_size(&self, id: [u32; 5], file_type: LayerFileEnum)
+        -> io::Result<usize>;
     fn get_rollup(&self, id: [u32; 5]) -> io::Result<Option<[u32; 5]>>;
     fn set_rollup(&self, id: [u32; 5], rollup: [u32; 5]) -> io::Result<()>;
     fn get_parent(&self, id: [u32; 5]) -> io::Result<Option<[u32; 5]>>;
@@ -198,8 +195,7 @@ impl ArchiveBackend for DirectoryArchiveBackend {
             .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "slice not found in archive"))?;
 
         let remaining = range.len() - read_from;
-        file.seek(SeekFrom::Current((range.start + read_from) as i64))
-            ?;
+        file.seek(SeekFrom::Current((range.start + read_from) as i64))?;
 
         Ok(ArchiveSliceReader { file, remaining })
     }
@@ -324,10 +320,7 @@ impl ArchiveMetadataBackend for DirectoryArchiveBackend {
     }
 
     fn get_parent(&self, id: [u32; 5]) -> io::Result<Option<[u32; 5]>> {
-        if let Some(parent_bytes) = self
-            .get_layer_structure_bytes(id, LayerFileEnum::Parent)
-            ?
-        {
+        if let Some(parent_bytes) = self.get_layer_structure_bytes(id, LayerFileEnum::Parent)? {
             let parent_string = std::str::from_utf8(&parent_bytes[..40]).unwrap();
             Ok(Some(string_to_name(parent_string).unwrap()))
         } else {
@@ -514,9 +507,7 @@ impl<M: ArchiveMetadataBackend, D: ArchiveBackend> ArchiveBackend for LruArchive
             let archive = Archive::parse(bytes);
             Ok(archive.slice_for(file_type))
         } else {
-            self.data_origin
-                .get_layer_structure_bytes(id, file_type)
-                
+            self.data_origin.get_layer_structure_bytes(id, file_type)
         }
     }
     fn store_layer_file(&self, id: [u32; 5], bytes: Bytes) -> io::Result<()> {
@@ -535,8 +526,7 @@ impl<M: ArchiveMetadataBackend, D: ArchiveBackend> ArchiveBackend for LruArchive
     ) -> io::Result<Self::Read> {
         if self.layer_fits_in_cache(id)? {
             let mut bytes = self
-                .get_layer_structure_bytes(id, file_type)
-                ?
+                .get_layer_structure_bytes(id, file_type)?
                 .ok_or_else(|| {
                     io::Error::new(io::ErrorKind::NotFound, "slice not found in archive")
                 })?;
@@ -546,8 +536,7 @@ impl<M: ArchiveMetadataBackend, D: ArchiveBackend> ArchiveBackend for LruArchive
         } else {
             Ok(Either::Right(
                 self.data_origin
-                    .read_layer_structure_bytes_from(id, file_type, read_from)
-                    ?,
+                    .read_layer_structure_bytes_from(id, file_type, read_from)?,
             ))
         }
     }
@@ -601,9 +590,7 @@ impl<M: ArchiveMetadataBackend, D: ArchiveBackend> ArchiveMetadataBackend
                 ))
             }
         } else {
-            self.metadata_origin
-                .get_layer_structure_size(id, file_type)
-                
+            self.metadata_origin.get_layer_structure_size(id, file_type)
         }
     }
     fn get_rollup(&self, id: [u32; 5]) -> io::Result<Option<[u32; 5]>> {
@@ -614,10 +601,7 @@ impl<M: ArchiveMetadataBackend, D: ArchiveBackend> ArchiveMetadataBackend
     }
 
     fn get_parent(&self, id: [u32; 5]) -> io::Result<Option<[u32; 5]>> {
-        if let Some(parent_bytes) = self
-            .get_layer_structure_bytes(id, LayerFileEnum::Parent)
-            ?
-        {
+        if let Some(parent_bytes) = self.get_layer_structure_bytes(id, LayerFileEnum::Parent)? {
             let parent_string = std::str::from_utf8(&parent_bytes[..40]).unwrap();
             Ok(Some(string_to_name(parent_string).unwrap()))
         } else {
@@ -682,10 +666,7 @@ impl std::io::Write for ConstructionFile {
                 x.put_slice(buf);
                 Ok(buf.len())
             }
-            _ => Err(io::Error::new(
-                io::ErrorKind::Other,
-                "file already written",
-            )),
+            _ => Err(io::Error::new(io::ErrorKind::Other, "file already written")),
         }
     }
 
@@ -729,10 +710,7 @@ impl std::io::Read for ConstructionFile {
                 buf[..to_read].copy_from_slice(slice.as_ref());
                 Ok(to_read)
             }
-            _ => Err(io::Error::new(
-                io::ErrorKind::Other,
-                "file not yet written",
-            )),
+            _ => Err(io::Error::new(io::ErrorKind::Other, "file not yet written")),
         }
     }
 }
@@ -989,32 +967,27 @@ impl<M: ArchiveMetadataBackend, D: ArchiveBackend> FileLoad for PersistentFileSl
     fn exists(&self) -> io::Result<bool> {
         self.metadata_backend
             .layer_file_exists(self.layer_id, self.file_type)
-            
     }
 
     fn size(&self) -> io::Result<usize> {
         self.metadata_backend
             .get_layer_structure_size(self.layer_id, self.file_type)
-            
     }
 
     fn open_read_from(&self, offset: usize) -> io::Result<Self::Read> {
         self.data_backend
             .read_layer_structure_bytes_from(self.layer_id, self.file_type, offset)
-            
     }
 
     fn map(&self) -> io::Result<Bytes> {
         self.data_backend
-            .get_layer_structure_bytes(self.layer_id, self.file_type)
-            ?
+            .get_layer_structure_bytes(self.layer_id, self.file_type)?
             .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "slice not found in archive"))
     }
 
     fn map_if_exists(&self) -> io::Result<Option<Bytes>> {
         self.data_backend
             .get_layer_structure_bytes(self.layer_id, self.file_type)
-            
     }
 }
 
@@ -1029,20 +1002,11 @@ impl<M: ArchiveMetadataBackend> FileLoad for ArchiveRollupFile<M> {
     type Read = BytesReader;
 
     fn exists(&self) -> io::Result<bool> {
-        Ok(self
-            .metadata_backend
-            .get_rollup(self.layer_id)
-            ?
-            .is_some())
+        Ok(self.metadata_backend.get_rollup(self.layer_id)?.is_some())
     }
 
     fn size(&self) -> io::Result<usize> {
-        if self
-            .metadata_backend
-            .get_rollup(self.layer_id)
-            ?
-            .is_some()
-        {
+        if self.metadata_backend.get_rollup(self.layer_id)?.is_some() {
             Ok(std::mem::size_of::<[u32; 5]>() + 2)
         } else {
             Err(io::Error::new(
@@ -1110,9 +1074,7 @@ impl<M: ArchiveMetadataBackend> SyncableFile for ArchiveRollupFileWriter<M> {
         let line = rollup_string.lines().skip(1).next().unwrap();
         let rollup_id = string_to_name(&line)?;
 
-        self.metadata_backend
-            .set_rollup(self.layer_id, rollup_id)
-            
+        self.metadata_backend.set_rollup(self.layer_id, rollup_id)
     }
 }
 
@@ -1157,9 +1119,7 @@ impl<M: ArchiveMetadataBackend, D: ArchiveBackend> FileLoad for ArchiveLayerHand
             Self::Construction(c) => {
                 ArchiveLayerHandleReader::Construction(c.open_read_from(offset)?)
             }
-            Self::Persistent(p) => {
-                ArchiveLayerHandleReader::Persistent(p.open_read_from(offset)?)
-            }
+            Self::Persistent(p) => ArchiveLayerHandleReader::Persistent(p.open_read_from(offset)?),
             Self::Rollup(r) => ArchiveLayerHandleReader::Rollup(r.open_read_from(offset)?),
         })
     }
@@ -1359,7 +1319,6 @@ impl<M: ArchiveMetadataBackend + 'static, D: ArchiveBackend + 'static> Persisten
 
         self.metadata_backend
             .layer_file_exists(directory, file_type)
-            
     }
 
     fn finalize(&self, directory: [u32; 5]) -> io::Result<()> {
@@ -1397,7 +1356,6 @@ impl<M: ArchiveMetadataBackend + 'static, D: ArchiveBackend + 'static> Persisten
 
         self.data_backend
             .store_layer_file(directory, data_buf.freeze())
-            
     }
 
     fn layer_parent(&self, name: [u32; 5]) -> io::Result<Option<[u32; 5]>> {

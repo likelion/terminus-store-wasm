@@ -29,8 +29,6 @@ use std::io::{self, Read, Write};
 use std::path::Path;
 use std::sync::Arc;
 
-
-
 macro_rules! walk_backwards_from_disk {
     ($store:ident, $name:ident, $current:ident, $body:block) => {
         let mut $current = $name;
@@ -108,7 +106,6 @@ pub trait LayerStore: 'static + Packable + Send + Sync {
     ) -> io::Result<Box<dyn LayerBuilder>>;
     fn create_child_layer(&self, parent: [u32; 5]) -> io::Result<Box<dyn LayerBuilder>> {
         self.create_child_layer_with_cache(parent, NOCACHE.clone())
-            
     }
 
     fn perform_rollup(&self, layer: Arc<InternalLayer>) -> io::Result<[u32; 5]>;
@@ -124,7 +121,6 @@ pub trait LayerStore: 'static + Packable + Send + Sync {
         upto: [u32; 5],
     ) -> io::Result<[u32; 5]> {
         self.perform_rollup_upto_with_cache(layer, upto, NOCACHE.clone())
-            
     }
     fn perform_imprecise_rollup_upto_with_cache(
         &self,
@@ -138,7 +134,6 @@ pub trait LayerStore: 'static + Packable + Send + Sync {
         upto: [u32; 5],
     ) -> io::Result<[u32; 5]> {
         self.perform_rollup_upto_with_cache(layer, upto, NOCACHE.clone())
-            
     }
     fn register_rollup(&self, layer: [u32; 5], rollup: [u32; 5]) -> io::Result<()>;
 
@@ -164,9 +159,7 @@ pub trait LayerStore: 'static + Packable + Send + Sync {
         cache: Arc<dyn LayerCache>,
     ) -> io::Result<[u32; 5]> {
         let name = layer.name();
-        let rollup = self
-            .perform_rollup_upto_with_cache(layer, upto, cache)
-            ?;
+        let rollup = self.perform_rollup_upto_with_cache(layer, upto, cache)?;
         self.register_rollup(name, rollup)?;
 
         Ok(rollup)
@@ -181,7 +174,6 @@ pub trait LayerStore: 'static + Packable + Send + Sync {
     /// option if you need to retain history.
     fn rollup_upto(&self, layer: Arc<InternalLayer>, upto: [u32; 5]) -> io::Result<[u32; 5]> {
         self.rollup_upto_with_cache(layer, upto, NOCACHE.clone())
-            
     }
 
     fn imprecise_rollup_upto_with_cache(
@@ -191,9 +183,7 @@ pub trait LayerStore: 'static + Packable + Send + Sync {
         cache: Arc<dyn LayerCache>,
     ) -> io::Result<[u32; 5]> {
         let name = layer.name();
-        let rollup = self
-            .perform_imprecise_rollup_upto_with_cache(layer, upto, cache)
-            ?;
+        let rollup = self.perform_imprecise_rollup_upto_with_cache(layer, upto, cache)?;
         self.register_rollup(name, rollup)?;
 
         Ok(rollup)
@@ -212,7 +202,6 @@ pub trait LayerStore: 'static + Packable + Send + Sync {
         upto: [u32; 5],
     ) -> io::Result<[u32; 5]> {
         self.imprecise_rollup_upto_with_cache(layer, upto, NOCACHE.clone())
-            
     }
 
     fn squash(&self, layer: Arc<InternalLayer>) -> io::Result<[u32; 5]>;
@@ -220,11 +209,7 @@ pub trait LayerStore: 'static + Packable + Send + Sync {
 
     fn merge_base_layer(&self, layers: &[[u32; 5]], temp_dir: &Path) -> io::Result<[u32; 5]>;
 
-    fn layer_is_ancestor_of(
-        &self,
-        descendant: [u32; 5],
-        ancestor: [u32; 5],
-    ) -> io::Result<bool>;
+    fn layer_is_ancestor_of(&self, descendant: [u32; 5], ancestor: [u32; 5]) -> io::Result<bool>;
 
     fn triple_addition_exists(
         &self,
@@ -247,10 +232,8 @@ pub trait LayerStore: 'static + Packable + Send + Sync {
         layer: [u32; 5],
     ) -> io::Result<OptInternalLayerTripleSubjectIterator>;
 
-    fn triple_removals(
-        &self,
-        layer: [u32; 5],
-    ) -> io::Result<OptInternalLayerTripleSubjectIterator>;
+    fn triple_removals(&self, layer: [u32; 5])
+        -> io::Result<OptInternalLayerTripleSubjectIterator>;
 
     fn triple_additions_s(
         &self,
@@ -732,18 +715,11 @@ pub trait PersistentLayerStore: 'static + Send + Sync + Clone {
         Ok((layer_dir, parent_layer, child_layer_files))
     }
 
-    fn node_dictionary_files(
-        &self,
-        layer: [u32; 5],
-    ) -> io::Result<DictionaryFiles<Self::File>> {
+    fn node_dictionary_files(&self, layer: [u32; 5]) -> io::Result<DictionaryFiles<Self::File>> {
         // does layer exist?
         if self.directory_exists(layer)? {
-            let offsets_file = self
-                .get_file(layer, FILENAMES.node_dictionary_offsets)
-                ?;
-            let blocks_file = self
-                .get_file(layer, FILENAMES.node_dictionary_blocks)
-                ?;
+            let offsets_file = self.get_file(layer, FILENAMES.node_dictionary_offsets)?;
+            let blocks_file = self.get_file(layer, FILENAMES.node_dictionary_blocks)?;
 
             Ok(DictionaryFiles {
                 blocks_file,
@@ -760,12 +736,8 @@ pub trait PersistentLayerStore: 'static + Send + Sync + Clone {
     ) -> io::Result<DictionaryFiles<Self::File>> {
         // does layer exist?
         if self.directory_exists(layer)? {
-            let offsets_file = self
-                .get_file(layer, FILENAMES.predicate_dictionary_offsets)
-                ?;
-            let blocks_file = self
-                .get_file(layer, FILENAMES.predicate_dictionary_blocks)
-                ?;
+            let offsets_file = self.get_file(layer, FILENAMES.predicate_dictionary_offsets)?;
+            let blocks_file = self.get_file(layer, FILENAMES.predicate_dictionary_blocks)?;
 
             Ok(DictionaryFiles {
                 blocks_file,
@@ -782,18 +754,12 @@ pub trait PersistentLayerStore: 'static + Send + Sync + Clone {
     ) -> io::Result<TypedDictionaryFiles<Self::File>> {
         // does layer exist?
         if self.directory_exists(layer)? {
-            let types_present_file = self
-                .get_file(layer, FILENAMES.value_dictionary_types_present)
-                ?;
-            let type_offsets_file = self
-                .get_file(layer, FILENAMES.value_dictionary_type_offsets)
-                ?;
-            let offsets_file = self
-                .get_file(layer, FILENAMES.value_dictionary_offsets)
-                ?;
-            let blocks_file = self
-                .get_file(layer, FILENAMES.value_dictionary_blocks)
-                ?;
+            let types_present_file =
+                self.get_file(layer, FILENAMES.value_dictionary_types_present)?;
+            let type_offsets_file =
+                self.get_file(layer, FILENAMES.value_dictionary_type_offsets)?;
+            let offsets_file = self.get_file(layer, FILENAMES.value_dictionary_offsets)?;
+            let blocks_file = self.get_file(layer, FILENAMES.value_dictionary_blocks)?;
 
             Ok(TypedDictionaryFiles {
                 types_present_file,
@@ -806,21 +772,13 @@ pub trait PersistentLayerStore: 'static + Send + Sync + Clone {
         }
     }
 
-    fn node_value_idmap_files(
-        &self,
-        layer: [u32; 5],
-    ) -> io::Result<BitIndexFiles<Self::File>> {
+    fn node_value_idmap_files(&self, layer: [u32; 5]) -> io::Result<BitIndexFiles<Self::File>> {
         // does layer exist?
         if self.directory_exists(layer)? {
-            let bits_file = self
-                .get_file(layer, FILENAMES.node_value_idmap_bits)
-                ?;
-            let blocks_file = self
-                .get_file(layer, FILENAMES.node_value_idmap_bit_index_blocks)
-                ?;
-            let sblocks_file = self
-                .get_file(layer, FILENAMES.node_value_idmap_bit_index_sblocks)
-                ?;
+            let bits_file = self.get_file(layer, FILENAMES.node_value_idmap_bits)?;
+            let blocks_file = self.get_file(layer, FILENAMES.node_value_idmap_bit_index_blocks)?;
+            let sblocks_file =
+                self.get_file(layer, FILENAMES.node_value_idmap_bit_index_sblocks)?;
 
             Ok(BitIndexFiles {
                 bits_file,
@@ -832,19 +790,12 @@ pub trait PersistentLayerStore: 'static + Send + Sync + Clone {
         }
     }
 
-    fn predicate_idmap_files(
-        &self,
-        layer: [u32; 5],
-    ) -> io::Result<BitIndexFiles<Self::File>> {
+    fn predicate_idmap_files(&self, layer: [u32; 5]) -> io::Result<BitIndexFiles<Self::File>> {
         // does layer exist?
         if self.directory_exists(layer)? {
             let bits_file = self.get_file(layer, FILENAMES.predicate_idmap_bits)?;
-            let blocks_file = self
-                .get_file(layer, FILENAMES.predicate_idmap_bit_index_blocks)
-                ?;
-            let sblocks_file = self
-                .get_file(layer, FILENAMES.predicate_idmap_bit_index_sblocks)
-                ?;
+            let blocks_file = self.get_file(layer, FILENAMES.predicate_idmap_bit_index_blocks)?;
+            let sblocks_file = self.get_file(layer, FILENAMES.predicate_idmap_bit_index_sblocks)?;
 
             Ok(BitIndexFiles {
                 bits_file,
@@ -881,60 +832,38 @@ pub trait PersistentLayerStore: 'static + Send + Sync + Clone {
             );
             if self.layer_has_parent(layer)? {
                 // this is a child layer
-                s_p_aj_nums_file = self
-                    .get_file(layer, FILENAMES.pos_s_p_adjacency_list_nums)
-                    ?;
-                s_p_aj_bits_file = self
-                    .get_file(layer, FILENAMES.pos_s_p_adjacency_list_bits)
-                    ?;
-                s_p_aj_bit_index_blocks_file = self
-                    .get_file(layer, FILENAMES.pos_s_p_adjacency_list_bit_index_blocks)
-                    ?;
-                s_p_aj_bit_index_sblocks_file = self
-                    .get_file(layer, FILENAMES.pos_s_p_adjacency_list_bit_index_sblocks)
-                    ?;
+                s_p_aj_nums_file = self.get_file(layer, FILENAMES.pos_s_p_adjacency_list_nums)?;
+                s_p_aj_bits_file = self.get_file(layer, FILENAMES.pos_s_p_adjacency_list_bits)?;
+                s_p_aj_bit_index_blocks_file =
+                    self.get_file(layer, FILENAMES.pos_s_p_adjacency_list_bit_index_blocks)?;
+                s_p_aj_bit_index_sblocks_file =
+                    self.get_file(layer, FILENAMES.pos_s_p_adjacency_list_bit_index_sblocks)?;
 
-                sp_o_aj_nums_file = self
-                    .get_file(layer, FILENAMES.pos_sp_o_adjacency_list_nums)
-                    ?;
-                sp_o_aj_bits_file = self
-                    .get_file(layer, FILENAMES.pos_sp_o_adjacency_list_bits)
-                    ?;
-                sp_o_aj_bit_index_blocks_file = self
-                    .get_file(layer, FILENAMES.pos_sp_o_adjacency_list_bit_index_blocks)
-                    ?;
-                sp_o_aj_bit_index_sblocks_file = self
-                    .get_file(layer, FILENAMES.pos_sp_o_adjacency_list_bit_index_sblocks)
-                    ?;
+                sp_o_aj_nums_file = self.get_file(layer, FILENAMES.pos_sp_o_adjacency_list_nums)?;
+                sp_o_aj_bits_file = self.get_file(layer, FILENAMES.pos_sp_o_adjacency_list_bits)?;
+                sp_o_aj_bit_index_blocks_file =
+                    self.get_file(layer, FILENAMES.pos_sp_o_adjacency_list_bit_index_blocks)?;
+                sp_o_aj_bit_index_sblocks_file =
+                    self.get_file(layer, FILENAMES.pos_sp_o_adjacency_list_bit_index_sblocks)?;
 
                 subjects_file = self.get_file(layer, FILENAMES.pos_subjects)?;
             } else {
                 // this is a base layer
-                s_p_aj_nums_file = self
-                    .get_file(layer, FILENAMES.base_s_p_adjacency_list_nums)
-                    ?;
-                s_p_aj_bits_file = self
-                    .get_file(layer, FILENAMES.base_s_p_adjacency_list_bits)
-                    ?;
-                s_p_aj_bit_index_blocks_file = self
-                    .get_file(layer, FILENAMES.base_s_p_adjacency_list_bit_index_blocks)
-                    ?;
-                s_p_aj_bit_index_sblocks_file = self
-                    .get_file(layer, FILENAMES.base_s_p_adjacency_list_bit_index_sblocks)
-                    ?;
+                s_p_aj_nums_file = self.get_file(layer, FILENAMES.base_s_p_adjacency_list_nums)?;
+                s_p_aj_bits_file = self.get_file(layer, FILENAMES.base_s_p_adjacency_list_bits)?;
+                s_p_aj_bit_index_blocks_file =
+                    self.get_file(layer, FILENAMES.base_s_p_adjacency_list_bit_index_blocks)?;
+                s_p_aj_bit_index_sblocks_file =
+                    self.get_file(layer, FILENAMES.base_s_p_adjacency_list_bit_index_sblocks)?;
 
-                sp_o_aj_nums_file = self
-                    .get_file(layer, FILENAMES.base_sp_o_adjacency_list_nums)
-                    ?;
-                sp_o_aj_bits_file = self
-                    .get_file(layer, FILENAMES.base_sp_o_adjacency_list_bits)
-                    ?;
-                sp_o_aj_bit_index_blocks_file = self
-                    .get_file(layer, FILENAMES.base_sp_o_adjacency_list_bit_index_blocks)
-                    ?;
-                sp_o_aj_bit_index_sblocks_file = self
-                    .get_file(layer, FILENAMES.base_sp_o_adjacency_list_bit_index_sblocks)
-                    ?;
+                sp_o_aj_nums_file =
+                    self.get_file(layer, FILENAMES.base_sp_o_adjacency_list_nums)?;
+                sp_o_aj_bits_file =
+                    self.get_file(layer, FILENAMES.base_sp_o_adjacency_list_bits)?;
+                sp_o_aj_bit_index_blocks_file =
+                    self.get_file(layer, FILENAMES.base_sp_o_adjacency_list_bit_index_blocks)?;
+                sp_o_aj_bit_index_sblocks_file =
+                    self.get_file(layer, FILENAMES.base_sp_o_adjacency_list_bit_index_sblocks)?;
 
                 subjects_file = self.get_file(layer, FILENAMES.base_subjects)?;
             }
@@ -989,31 +918,19 @@ pub trait PersistentLayerStore: 'static + Send + Sync + Clone {
                     sp_o_aj_bit_index_sblocks_file,
                 );
 
-                s_p_aj_nums_file = self
-                    .get_file(layer, FILENAMES.neg_s_p_adjacency_list_nums)
-                    ?;
-                s_p_aj_bits_file = self
-                    .get_file(layer, FILENAMES.neg_s_p_adjacency_list_bits)
-                    ?;
-                s_p_aj_bit_index_blocks_file = self
-                    .get_file(layer, FILENAMES.neg_s_p_adjacency_list_bit_index_blocks)
-                    ?;
-                s_p_aj_bit_index_sblocks_file = self
-                    .get_file(layer, FILENAMES.neg_s_p_adjacency_list_bit_index_sblocks)
-                    ?;
+                s_p_aj_nums_file = self.get_file(layer, FILENAMES.neg_s_p_adjacency_list_nums)?;
+                s_p_aj_bits_file = self.get_file(layer, FILENAMES.neg_s_p_adjacency_list_bits)?;
+                s_p_aj_bit_index_blocks_file =
+                    self.get_file(layer, FILENAMES.neg_s_p_adjacency_list_bit_index_blocks)?;
+                s_p_aj_bit_index_sblocks_file =
+                    self.get_file(layer, FILENAMES.neg_s_p_adjacency_list_bit_index_sblocks)?;
 
-                sp_o_aj_nums_file = self
-                    .get_file(layer, FILENAMES.neg_sp_o_adjacency_list_nums)
-                    ?;
-                sp_o_aj_bits_file = self
-                    .get_file(layer, FILENAMES.neg_sp_o_adjacency_list_bits)
-                    ?;
-                sp_o_aj_bit_index_blocks_file = self
-                    .get_file(layer, FILENAMES.neg_sp_o_adjacency_list_bit_index_blocks)
-                    ?;
-                sp_o_aj_bit_index_sblocks_file = self
-                    .get_file(layer, FILENAMES.neg_sp_o_adjacency_list_bit_index_sblocks)
-                    ?;
+                sp_o_aj_nums_file = self.get_file(layer, FILENAMES.neg_sp_o_adjacency_list_nums)?;
+                sp_o_aj_bits_file = self.get_file(layer, FILENAMES.neg_sp_o_adjacency_list_bits)?;
+                sp_o_aj_bit_index_blocks_file =
+                    self.get_file(layer, FILENAMES.neg_sp_o_adjacency_list_bit_index_blocks)?;
+                sp_o_aj_bit_index_sblocks_file =
+                    self.get_file(layer, FILENAMES.neg_sp_o_adjacency_list_bit_index_sblocks)?;
 
                 subjects_file = self.get_file(layer, FILENAMES.neg_subjects)?;
                 let s_p_aj_files = AdjacencyListFiles {
@@ -1052,35 +969,26 @@ pub trait PersistentLayerStore: 'static + Send + Sync + Clone {
             let (wavelet_bits_file, wavelet_bit_index_blocks_file, wavelet_bit_index_sblocks_file);
             if self.layer_has_parent(layer)? {
                 // this is a child layer
-                wavelet_bits_file = self
-                    .get_file(layer, FILENAMES.pos_predicate_wavelet_tree_bits)
-                    ?;
-                wavelet_bit_index_blocks_file = self
-                    .get_file(layer, FILENAMES.pos_predicate_wavelet_tree_bit_index_blocks)
-                    ?;
-                wavelet_bit_index_sblocks_file = self
-                    .get_file(
-                        layer,
-                        FILENAMES.pos_predicate_wavelet_tree_bit_index_sblocks,
-                    )
-                    ?;
+                wavelet_bits_file =
+                    self.get_file(layer, FILENAMES.pos_predicate_wavelet_tree_bits)?;
+                wavelet_bit_index_blocks_file =
+                    self.get_file(layer, FILENAMES.pos_predicate_wavelet_tree_bit_index_blocks)?;
+                wavelet_bit_index_sblocks_file = self.get_file(
+                    layer,
+                    FILENAMES.pos_predicate_wavelet_tree_bit_index_sblocks,
+                )?;
             } else {
                 // this is a base layer
-                wavelet_bits_file = self
-                    .get_file(layer, FILENAMES.base_predicate_wavelet_tree_bits)
-                    ?;
-                wavelet_bit_index_blocks_file = self
-                    .get_file(
-                        layer,
-                        FILENAMES.base_predicate_wavelet_tree_bit_index_blocks,
-                    )
-                    ?;
-                wavelet_bit_index_sblocks_file = self
-                    .get_file(
-                        layer,
-                        FILENAMES.base_predicate_wavelet_tree_bit_index_sblocks,
-                    )
-                    ?;
+                wavelet_bits_file =
+                    self.get_file(layer, FILENAMES.base_predicate_wavelet_tree_bits)?;
+                wavelet_bit_index_blocks_file = self.get_file(
+                    layer,
+                    FILENAMES.base_predicate_wavelet_tree_bit_index_blocks,
+                )?;
+                wavelet_bit_index_sblocks_file = self.get_file(
+                    layer,
+                    FILENAMES.base_predicate_wavelet_tree_bit_index_sblocks,
+                )?;
             }
 
             let bitindex_files = BitIndexFiles {
@@ -1102,18 +1010,14 @@ pub trait PersistentLayerStore: 'static + Send + Sync + Clone {
         if self.directory_exists(layer)? {
             if self.layer_has_parent(layer)? {
                 // this is a child layer
-                let wavelet_bits_file = self
-                    .get_file(layer, FILENAMES.neg_predicate_wavelet_tree_bits)
-                    ?;
-                let wavelet_bit_index_blocks_file = self
-                    .get_file(layer, FILENAMES.neg_predicate_wavelet_tree_bit_index_blocks)
-                    ?;
-                let wavelet_bit_index_sblocks_file = self
-                    .get_file(
-                        layer,
-                        FILENAMES.neg_predicate_wavelet_tree_bit_index_sblocks,
-                    )
-                    ?;
+                let wavelet_bits_file =
+                    self.get_file(layer, FILENAMES.neg_predicate_wavelet_tree_bits)?;
+                let wavelet_bit_index_blocks_file =
+                    self.get_file(layer, FILENAMES.neg_predicate_wavelet_tree_bit_index_blocks)?;
+                let wavelet_bit_index_sblocks_file = self.get_file(
+                    layer,
+                    FILENAMES.neg_predicate_wavelet_tree_bit_index_sblocks,
+                )?;
                 let bitindex_files = BitIndexFiles {
                     bits_file: wavelet_bits_file,
                     blocks_file: wavelet_bit_index_blocks_file,
@@ -1156,61 +1060,39 @@ pub trait PersistentLayerStore: 'static + Send + Sync + Clone {
             );
             if self.layer_has_parent(layer)? {
                 // this is a child layer
-                o_ps_aj_nums_file = self
-                    .get_file(layer, FILENAMES.pos_o_ps_adjacency_list_nums)
-                    ?;
-                o_ps_aj_bits_file = self
-                    .get_file(layer, FILENAMES.pos_o_ps_adjacency_list_bits)
-                    ?;
-                o_ps_aj_bit_index_blocks_file = self
-                    .get_file(layer, FILENAMES.pos_o_ps_adjacency_list_bit_index_blocks)
-                    ?;
-                o_ps_aj_bit_index_sblocks_file = self
-                    .get_file(layer, FILENAMES.pos_o_ps_adjacency_list_bit_index_sblocks)
-                    ?;
+                o_ps_aj_nums_file = self.get_file(layer, FILENAMES.pos_o_ps_adjacency_list_nums)?;
+                o_ps_aj_bits_file = self.get_file(layer, FILENAMES.pos_o_ps_adjacency_list_bits)?;
+                o_ps_aj_bit_index_blocks_file =
+                    self.get_file(layer, FILENAMES.pos_o_ps_adjacency_list_bit_index_blocks)?;
+                o_ps_aj_bit_index_sblocks_file =
+                    self.get_file(layer, FILENAMES.pos_o_ps_adjacency_list_bit_index_sblocks)?;
 
-                s_p_aj_nums_file = self
-                    .get_file(layer, FILENAMES.pos_s_p_adjacency_list_nums)
-                    ?;
-                s_p_aj_bits_file = self
-                    .get_file(layer, FILENAMES.pos_s_p_adjacency_list_bits)
-                    ?;
-                s_p_aj_bit_index_blocks_file = self
-                    .get_file(layer, FILENAMES.pos_s_p_adjacency_list_bit_index_blocks)
-                    ?;
-                s_p_aj_bit_index_sblocks_file = self
-                    .get_file(layer, FILENAMES.pos_s_p_adjacency_list_bit_index_sblocks)
-                    ?;
+                s_p_aj_nums_file = self.get_file(layer, FILENAMES.pos_s_p_adjacency_list_nums)?;
+                s_p_aj_bits_file = self.get_file(layer, FILENAMES.pos_s_p_adjacency_list_bits)?;
+                s_p_aj_bit_index_blocks_file =
+                    self.get_file(layer, FILENAMES.pos_s_p_adjacency_list_bit_index_blocks)?;
+                s_p_aj_bit_index_sblocks_file =
+                    self.get_file(layer, FILENAMES.pos_s_p_adjacency_list_bit_index_sblocks)?;
 
                 subjects_file = self.get_file(layer, FILENAMES.pos_subjects)?;
                 objects_file = self.get_file(layer, FILENAMES.pos_objects)?;
             } else {
                 // this is a base layer
-                o_ps_aj_nums_file = self
-                    .get_file(layer, FILENAMES.base_o_ps_adjacency_list_nums)
-                    ?;
-                o_ps_aj_bits_file = self
-                    .get_file(layer, FILENAMES.base_o_ps_adjacency_list_bits)
-                    ?;
-                o_ps_aj_bit_index_blocks_file = self
-                    .get_file(layer, FILENAMES.base_o_ps_adjacency_list_bit_index_blocks)
-                    ?;
-                o_ps_aj_bit_index_sblocks_file = self
-                    .get_file(layer, FILENAMES.base_o_ps_adjacency_list_bit_index_sblocks)
-                    ?;
+                o_ps_aj_nums_file =
+                    self.get_file(layer, FILENAMES.base_o_ps_adjacency_list_nums)?;
+                o_ps_aj_bits_file =
+                    self.get_file(layer, FILENAMES.base_o_ps_adjacency_list_bits)?;
+                o_ps_aj_bit_index_blocks_file =
+                    self.get_file(layer, FILENAMES.base_o_ps_adjacency_list_bit_index_blocks)?;
+                o_ps_aj_bit_index_sblocks_file =
+                    self.get_file(layer, FILENAMES.base_o_ps_adjacency_list_bit_index_sblocks)?;
 
-                s_p_aj_nums_file = self
-                    .get_file(layer, FILENAMES.base_s_p_adjacency_list_nums)
-                    ?;
-                s_p_aj_bits_file = self
-                    .get_file(layer, FILENAMES.base_s_p_adjacency_list_bits)
-                    ?;
-                s_p_aj_bit_index_blocks_file = self
-                    .get_file(layer, FILENAMES.base_s_p_adjacency_list_bit_index_blocks)
-                    ?;
-                s_p_aj_bit_index_sblocks_file = self
-                    .get_file(layer, FILENAMES.base_s_p_adjacency_list_bit_index_sblocks)
-                    ?;
+                s_p_aj_nums_file = self.get_file(layer, FILENAMES.base_s_p_adjacency_list_nums)?;
+                s_p_aj_bits_file = self.get_file(layer, FILENAMES.base_s_p_adjacency_list_bits)?;
+                s_p_aj_bit_index_blocks_file =
+                    self.get_file(layer, FILENAMES.base_s_p_adjacency_list_bit_index_blocks)?;
+                s_p_aj_bit_index_sblocks_file =
+                    self.get_file(layer, FILENAMES.base_s_p_adjacency_list_bit_index_sblocks)?;
 
                 subjects_file = self.get_file(layer, FILENAMES.base_subjects)?;
                 objects_file = self.get_file(layer, FILENAMES.base_objects)?;
@@ -1254,31 +1136,23 @@ pub trait PersistentLayerStore: 'static + Send + Sync + Clone {
         if self.directory_exists(layer)? {
             if self.layer_has_parent(layer)? {
                 // this is a child layer
-                let o_ps_aj_nums_file = self
-                    .get_file(layer, FILENAMES.neg_o_ps_adjacency_list_nums)
-                    ?;
-                let o_ps_aj_bits_file = self
-                    .get_file(layer, FILENAMES.neg_o_ps_adjacency_list_bits)
-                    ?;
-                let o_ps_aj_bit_index_blocks_file = self
-                    .get_file(layer, FILENAMES.neg_o_ps_adjacency_list_bit_index_blocks)
-                    ?;
-                let o_ps_aj_bit_index_sblocks_file = self
-                    .get_file(layer, FILENAMES.neg_o_ps_adjacency_list_bit_index_sblocks)
-                    ?;
+                let o_ps_aj_nums_file =
+                    self.get_file(layer, FILENAMES.neg_o_ps_adjacency_list_nums)?;
+                let o_ps_aj_bits_file =
+                    self.get_file(layer, FILENAMES.neg_o_ps_adjacency_list_bits)?;
+                let o_ps_aj_bit_index_blocks_file =
+                    self.get_file(layer, FILENAMES.neg_o_ps_adjacency_list_bit_index_blocks)?;
+                let o_ps_aj_bit_index_sblocks_file =
+                    self.get_file(layer, FILENAMES.neg_o_ps_adjacency_list_bit_index_sblocks)?;
 
-                let s_p_aj_nums_file = self
-                    .get_file(layer, FILENAMES.neg_s_p_adjacency_list_nums)
-                    ?;
-                let s_p_aj_bits_file = self
-                    .get_file(layer, FILENAMES.neg_s_p_adjacency_list_bits)
-                    ?;
-                let s_p_aj_bit_index_blocks_file = self
-                    .get_file(layer, FILENAMES.neg_s_p_adjacency_list_bit_index_blocks)
-                    ?;
-                let s_p_aj_bit_index_sblocks_file = self
-                    .get_file(layer, FILENAMES.neg_s_p_adjacency_list_bit_index_sblocks)
-                    ?;
+                let s_p_aj_nums_file =
+                    self.get_file(layer, FILENAMES.neg_s_p_adjacency_list_nums)?;
+                let s_p_aj_bits_file =
+                    self.get_file(layer, FILENAMES.neg_s_p_adjacency_list_bits)?;
+                let s_p_aj_bit_index_blocks_file =
+                    self.get_file(layer, FILENAMES.neg_s_p_adjacency_list_bit_index_blocks)?;
+                let s_p_aj_bit_index_sblocks_file =
+                    self.get_file(layer, FILENAMES.neg_s_p_adjacency_list_bit_index_sblocks)?;
 
                 let subjects_file = self.get_file(layer, FILENAMES.neg_subjects)?;
                 let objects_file = self.get_file(layer, FILENAMES.neg_objects)?;
@@ -1324,20 +1198,12 @@ pub trait PersistentLayerStore: 'static + Send + Sync + Clone {
             let (s_p_nums_file, sp_o_bits_file);
             if self.layer_has_parent(layer)? {
                 // this is a child layer
-                s_p_nums_file = self
-                    .get_file(layer, FILENAMES.pos_s_p_adjacency_list_nums)
-                    ?;
-                sp_o_bits_file = self
-                    .get_file(layer, FILENAMES.pos_sp_o_adjacency_list_bits)
-                    ?;
+                s_p_nums_file = self.get_file(layer, FILENAMES.pos_s_p_adjacency_list_nums)?;
+                sp_o_bits_file = self.get_file(layer, FILENAMES.pos_sp_o_adjacency_list_bits)?;
             } else {
                 // this is a base layer
-                s_p_nums_file = self
-                    .get_file(layer, FILENAMES.base_s_p_adjacency_list_nums)
-                    ?;
-                sp_o_bits_file = self
-                    .get_file(layer, FILENAMES.base_sp_o_adjacency_list_bits)
-                    ?;
+                s_p_nums_file = self.get_file(layer, FILENAMES.base_s_p_adjacency_list_nums)?;
+                sp_o_bits_file = self.get_file(layer, FILENAMES.base_sp_o_adjacency_list_bits)?;
             }
 
             let predicate_wavelet_files = self.predicate_wavelet_addition_files(layer)?;
@@ -1355,15 +1221,11 @@ pub trait PersistentLayerStore: 'static + Send + Sync + Clone {
         if self.directory_exists(layer)? {
             if self.layer_has_parent(layer)? {
                 // this is a child layer
-                let s_p_nums_file = self
-                    .get_file(layer, FILENAMES.neg_s_p_adjacency_list_nums)
-                    ?;
-                let sp_o_bits_file = self
-                    .get_file(layer, FILENAMES.neg_sp_o_adjacency_list_bits)
-                    ?;
+                let s_p_nums_file = self.get_file(layer, FILENAMES.neg_s_p_adjacency_list_nums)?;
+                let sp_o_bits_file =
+                    self.get_file(layer, FILENAMES.neg_sp_o_adjacency_list_bits)?;
                 let predicate_wavelet_files = self
-                    .predicate_wavelet_removal_files(layer)
-                    ?
+                    .predicate_wavelet_removal_files(layer)?
                     .expect("expected wavelet removal files to exist");
                 Ok(Some((
                     s_p_nums_file,
@@ -1549,8 +1411,7 @@ impl<F: 'static + FileLoad + FileStore + Clone, T: 'static + PersistentLayerStor
             match rollup {
                 None => {
                     let files = self.child_layer_files(layer_id)?;
-                    let child_layer =
-                        ChildLayer::load_from_files(layer_id, ancestor, &files)?;
+                    let child_layer = ChildLayer::load_from_files(layer_id, ancestor, &files)?;
                     layer = Arc::new(child_layer.into());
                 }
                 Some((rollup_id, original_parent_id_option)) => {
@@ -1558,11 +1419,8 @@ impl<F: 'static + FileLoad + FileStore + Clone, T: 'static + PersistentLayerStor
                         .expect("child rollup layer should always have original parent id");
 
                     let files = self.child_layer_files(rollup_id)?;
-                    let child_layer: Arc<InternalLayer> = Arc::new(
-                        ChildLayer::load_from_files(rollup_id, ancestor, &files)
-                            ?
-                            .into(),
-                    );
+                    let child_layer: Arc<InternalLayer> =
+                        Arc::new(ChildLayer::load_from_files(rollup_id, ancestor, &files)?.into());
                     cache.cache_layer(child_layer.clone());
 
                     layer = Arc::new(
@@ -1656,8 +1514,7 @@ impl<F: 'static + FileLoad + FileStore + Clone, T: 'static + PersistentLayerStor
 
     fn get_node_value_idmap(&self, name: [u32; 5]) -> io::Result<Option<IdMap>> {
         if self.directory_exists(name)? {
-            let size = self.get_node_count(name)?.unwrap()
-                + self.get_value_count(name)?.unwrap();
+            let size = self.get_node_count(name)?.unwrap() + self.get_value_count(name)?.unwrap();
             let width = util::calculate_width(size);
             let files = self.node_value_idmap_files(name)?;
             let maps = files.map_all_if_exists()?;
@@ -1708,9 +1565,8 @@ impl<F: 'static + FileLoad + FileStore + Clone, T: 'static + PersistentLayerStor
         parent: [u32; 5],
         cache: Arc<dyn LayerCache>,
     ) -> io::Result<Box<dyn LayerBuilder>> {
-        let (layer_dir, parent_layer, child_layer_files) = self
-            .create_child_layer_files_with_cache(parent, cache)
-            ?;
+        let (layer_dir, parent_layer, child_layer_files) =
+            self.create_child_layer_files_with_cache(parent, cache)?;
 
         Ok(Box::new(SimpleLayerBuilder::from_parent(
             layer_dir,
@@ -1771,9 +1627,8 @@ impl<F: 'static + FileLoad + FileStore + Clone, T: 'static + PersistentLayerStor
             }
         }
 
-        let (layer_dir, _parent_layer, child_layer_files) = self
-            .create_child_layer_files_with_cache(upto, cache)
-            ?;
+        let (layer_dir, _parent_layer, child_layer_files) =
+            self.create_child_layer_files_with_cache(upto, cache)?;
         delta_rollup_upto(self, &layer, upto, child_layer_files)?;
         self.finalize(layer_dir)?;
         Ok(layer_dir)
@@ -1806,9 +1661,8 @@ impl<F: 'static + FileLoad + FileStore + Clone, T: 'static + PersistentLayerStor
             }
         }
 
-        let (layer_dir, _parent_layer, child_layer_files) = self
-            .create_child_layer_files_with_cache(upto, cache)
-            ?;
+        let (layer_dir, _parent_layer, child_layer_files) =
+            self.create_child_layer_files_with_cache(upto, cache)?;
         imprecise_delta_rollup_upto(self, &layer, upto, child_layer_files)?;
         self.finalize(layer_dir)?;
         Ok(layer_dir)
@@ -1967,9 +1821,7 @@ impl<F: 'static + FileLoad + FileStore + Clone, T: 'static + PersistentLayerStor
         let base_node_value_count = base_node_count + base_value_count;
         let mut node_value_count = base_node_value_count;
         let mut pred_count = base_pred_count;
-        let stack_names = self
-            .retrieve_layer_stack_names_upto(layer.name(), upto)
-            ?;
+        let stack_names = self.retrieve_layer_stack_names_upto(layer.name(), upto)?;
 
         let mut structures = Vec::with_capacity(stack_names.len());
         for layer_name in stack_names {
@@ -2113,8 +1965,7 @@ impl<F: 'static + FileLoad + FileStore + Clone, T: 'static + PersistentLayerStor
             child_layer_files.node_dictionary_files.clone(),
             child_layer_files.predicate_dictionary_files.clone(),
             child_layer_files.value_dictionary_files.clone(),
-        )
-        ?;
+        )?;
 
         builder.add_nodes_bytes(nodes.into_iter().map(|(x, _)| x.to_bytes()));
         builder.add_predicates_bytes(predicates.into_iter().map(|(x, _)| x.to_bytes()));
@@ -2128,8 +1979,7 @@ impl<F: 'static + FileLoad + FileStore + Clone, T: 'static + PersistentLayerStor
             node_count,
             predicate_count,
             value_count,
-        )
-        ?;
+        )?;
         let mut triple_changes = Vec::with_capacity(num_triple_changes);
         for (change_type, t) in layer_changes_upto {
             let mapped_subject = if t.subject <= base_node_value_count {
@@ -2155,24 +2005,16 @@ impl<F: 'static + FileLoad + FileStore + Clone, T: 'static + PersistentLayerStor
         triple_changes.sort();
         for (change_type, mapped_triple) in triple_changes.into_iter() {
             match change_type {
-                TripleChange::Addition => {
-                    builder
-                        .add_triple_unchecked(
-                            mapped_triple.subject,
-                            mapped_triple.predicate,
-                            mapped_triple.object,
-                        )
-                        ?
-                }
-                TripleChange::Removal => {
-                    builder
-                        .remove_triple_unchecked(
-                            mapped_triple.subject,
-                            mapped_triple.predicate,
-                            mapped_triple.object,
-                        )
-                        ?
-                }
+                TripleChange::Addition => builder.add_triple_unchecked(
+                    mapped_triple.subject,
+                    mapped_triple.predicate,
+                    mapped_triple.object,
+                )?,
+                TripleChange::Removal => builder.remove_triple_unchecked(
+                    mapped_triple.subject,
+                    mapped_triple.predicate,
+                    mapped_triple.object,
+                )?,
             }
         }
         builder.finalize()?;
@@ -2182,11 +2024,7 @@ impl<F: 'static + FileLoad + FileStore + Clone, T: 'static + PersistentLayerStor
         Ok(layer_name)
     }
 
-    fn merge_base_layer(
-        &self,
-        layers: &[[u32; 5]],
-        temp_path: &Path,
-    ) -> io::Result<[u32; 5]> {
+    fn merge_base_layer(&self, layers: &[[u32; 5]], temp_path: &Path) -> io::Result<[u32; 5]> {
         let mut layer_files = Vec::with_capacity(layers.len());
         for layer in layers {
             if self.layer_has_parent(*layer)? {
@@ -2237,8 +2075,7 @@ impl<F: 'static + FileLoad + FileStore + Clone, T: 'static + PersistentLayerStor
         predicate: u64,
         object: u64,
     ) -> io::Result<bool> {
-        let (subjects_file, s_p_aj_files, sp_o_aj_files) =
-            self.triple_addition_files(layer)?;
+        let (subjects_file, s_p_aj_files, sp_o_aj_files) = self.triple_addition_files(layer)?;
 
         file_triple_exists(
             subjects_file,
@@ -2248,7 +2085,6 @@ impl<F: 'static + FileLoad + FileStore + Clone, T: 'static + PersistentLayerStor
             predicate,
             object,
         )
-        
     }
 
     fn triple_removal_exists(
@@ -2269,7 +2105,6 @@ impl<F: 'static + FileLoad + FileStore + Clone, T: 'static + PersistentLayerStor
                 predicate,
                 object,
             )
-            
         } else {
             Ok(false)
         }
@@ -2279,8 +2114,7 @@ impl<F: 'static + FileLoad + FileStore + Clone, T: 'static + PersistentLayerStor
         &self,
         layer: [u32; 5],
     ) -> io::Result<OptInternalLayerTripleSubjectIterator> {
-        let (subjects_file, s_p_aj_files, sp_o_aj_files) =
-            self.triple_addition_files(layer)?;
+        let (subjects_file, s_p_aj_files, sp_o_aj_files) = self.triple_addition_files(layer)?;
 
         Ok(OptInternalLayerTripleSubjectIterator(Some(
             file_triple_iterator(subjects_file, s_p_aj_files, sp_o_aj_files)?,
@@ -2307,12 +2141,10 @@ impl<F: 'static + FileLoad + FileStore + Clone, T: 'static + PersistentLayerStor
         layer: [u32; 5],
         subject: u64,
     ) -> io::Result<Box<dyn Iterator<Item = IdTriple> + Send>> {
-        let (subjects_file, s_p_aj_files, sp_o_aj_files) =
-            self.triple_addition_files(layer)?;
+        let (subjects_file, s_p_aj_files, sp_o_aj_files) = self.triple_addition_files(layer)?;
 
         Ok(Box::new(
-            file_triple_iterator(subjects_file, s_p_aj_files, sp_o_aj_files)
-                ?
+            file_triple_iterator(subjects_file, s_p_aj_files, sp_o_aj_files)?
                 .seek_subject(subject)
                 .take_while(move |t| t.subject == subject),
         ) as Box<dyn Iterator<Item = _> + Send>)
@@ -2327,8 +2159,7 @@ impl<F: 'static + FileLoad + FileStore + Clone, T: 'static + PersistentLayerStor
             self.triple_removal_files(layer)?
         {
             Ok(Box::new(
-                file_triple_iterator(subjects_file, s_p_aj_files, sp_o_aj_files)
-                    ?
+                file_triple_iterator(subjects_file, s_p_aj_files, sp_o_aj_files)?
                     .seek_subject(subject)
                     .take_while(move |t| t.subject == subject),
             ) as Box<dyn Iterator<Item = _> + Send>)
@@ -2343,12 +2174,10 @@ impl<F: 'static + FileLoad + FileStore + Clone, T: 'static + PersistentLayerStor
         subject: u64,
         predicate: u64,
     ) -> io::Result<Box<dyn Iterator<Item = IdTriple> + Send>> {
-        let (subjects_file, s_p_aj_files, sp_o_aj_files) =
-            self.triple_addition_files(layer)?;
+        let (subjects_file, s_p_aj_files, sp_o_aj_files) = self.triple_addition_files(layer)?;
 
         Ok(Box::new(
-            file_triple_iterator(subjects_file, s_p_aj_files, sp_o_aj_files)
-                ?
+            file_triple_iterator(subjects_file, s_p_aj_files, sp_o_aj_files)?
                 .seek_subject_predicate(subject, predicate)
                 .take_while(move |t| t.predicate == predicate && t.subject == subject),
         ) as Box<dyn Iterator<Item = _> + Send>)
@@ -2364,8 +2193,7 @@ impl<F: 'static + FileLoad + FileStore + Clone, T: 'static + PersistentLayerStor
             self.triple_removal_files(layer)?
         {
             Ok(Box::new(
-                file_triple_iterator(subjects_file, s_p_aj_files, sp_o_aj_files)
-                    ?
+                file_triple_iterator(subjects_file, s_p_aj_files, sp_o_aj_files)?
                     .seek_subject_predicate(subject, predicate)
                     .take_while(move |t| t.predicate == predicate && t.subject == subject),
             ) as Box<dyn Iterator<Item = _> + Send>)
@@ -2379,20 +2207,16 @@ impl<F: 'static + FileLoad + FileStore + Clone, T: 'static + PersistentLayerStor
         layer: [u32; 5],
         predicate: u64,
     ) -> io::Result<Box<dyn Iterator<Item = IdTriple> + Send>> {
-        let (subjects_file, s_p_aj_files, sp_o_aj_files) =
-            self.triple_addition_files(layer)?;
+        let (subjects_file, s_p_aj_files, sp_o_aj_files) = self.triple_addition_files(layer)?;
         let predicate_wavelet_files = self.predicate_wavelet_addition_files(layer)?;
 
-        Ok(Box::new(
-            file_triple_iterator_by_predicate(
-                subjects_file,
-                s_p_aj_files,
-                sp_o_aj_files,
-                predicate_wavelet_files,
-                predicate,
-            )
-            ?,
-        ) as Box<dyn Iterator<Item = _> + Send>)
+        Ok(Box::new(file_triple_iterator_by_predicate(
+            subjects_file,
+            s_p_aj_files,
+            sp_o_aj_files,
+            predicate_wavelet_files,
+            predicate,
+        )?) as Box<dyn Iterator<Item = _> + Send>)
     }
 
     fn triple_removals_p(
@@ -2404,16 +2228,13 @@ impl<F: 'static + FileLoad + FileStore + Clone, T: 'static + PersistentLayerStor
             self.triple_removal_files(layer)?,
             self.predicate_wavelet_removal_files(layer)?,
         ) {
-            Ok(Box::new(
-                file_triple_iterator_by_predicate(
-                    subjects_file,
-                    s_p_aj_files,
-                    sp_o_aj_files,
-                    predicate_wavelet_files,
-                    predicate,
-                )
-                ?,
-            ) as Box<dyn Iterator<Item = _> + Send>)
+            Ok(Box::new(file_triple_iterator_by_predicate(
+                subjects_file,
+                s_p_aj_files,
+                sp_o_aj_files,
+                predicate_wavelet_files,
+                predicate,
+            )?) as Box<dyn Iterator<Item = _> + Send>)
         } else {
             Ok(Box::new(std::iter::empty()) as Box<dyn Iterator<Item = _> + Send>)
         }
@@ -2434,8 +2255,7 @@ impl<F: 'static + FileLoad + FileStore + Clone, T: 'static + PersistentLayerStor
                 o_ps_aj_files,
                 s_p_aj_files,
                 object,
-            )
-            ?
+            )?
             .take_while(move |t| t.object == object),
         ) as Box<dyn Iterator<Item = _> + Send>)
     }
@@ -2455,8 +2275,7 @@ impl<F: 'static + FileLoad + FileStore + Clone, T: 'static + PersistentLayerStor
                     o_ps_aj_files,
                     s_p_aj_files,
                     object,
-                )
-                ?
+                )?
                 .take_while(move |t| t.object == object),
             ) as Box<dyn Iterator<Item = _> + Send>)
         } else {
@@ -2534,8 +2353,7 @@ pub(crate) fn file_triple_exists<F: FileLoad + FileStore>(
     let sp_o_maps = sp_o_adjacency_list_files.map_all()?;
 
     let subjects: Option<MonotonicLogArray> = subjects_file
-        .map_if_exists()
-        ?
+        .map_if_exists()?
         .map(|l| LogArray::parse(l).unwrap().into());
     let s_p_aj = s_p_maps.into();
     let sp_o_aj = sp_o_maps.into();
@@ -2559,8 +2377,7 @@ pub(crate) fn file_triple_iterator<F: FileLoad + FileStore>(
     let sp_o_maps = sp_o_adjacency_list_files.map_all()?;
 
     let subjects: Option<MonotonicLogArray> = subjects_file
-        .map_if_exists()
-        ?
+        .map_if_exists()?
         .map(|l| LogArray::parse(l).unwrap().into());
     let s_p_aj = s_p_maps.into();
     let sp_o_aj = sp_o_maps.into();
@@ -2582,8 +2399,7 @@ pub(crate) fn file_triple_iterator_by_predicate<F: FileLoad + FileStore>(
     let predicate_wavelet_maps = predicate_wavelet_files.map_all()?;
 
     let subjects: Option<MonotonicLogArray> = subjects_file
-        .map_if_exists()
-        ?
+        .map_if_exists()?
         .map(|l| LogArray::parse(l).unwrap().into());
     let s_p_aj: AdjacencyList = s_p_maps.into();
     let sp_o_aj: AdjacencyList = sp_o_maps.into();
@@ -2607,12 +2423,10 @@ pub(crate) fn file_triple_iterator_by_object<F: FileLoad + FileStore>(
     object: u64,
 ) -> io::Result<impl Iterator<Item = IdTriple> + Send> {
     let subjects: Option<MonotonicLogArray> = subjects_file
-        .map_if_exists()
-        ?
+        .map_if_exists()?
         .map(|l| LogArray::parse(l).unwrap().into());
     let objects: Option<MonotonicLogArray> = objects_file
-        .map_if_exists()
-        ?
+        .map_if_exists()?
         .map(|l| LogArray::parse(l).unwrap().into());
 
     let o_ps_maps = o_ps_adjacency_list_files.map_all()?;
@@ -2632,10 +2446,7 @@ pub(crate) fn file_triple_layer_count<F: FileLoad + FileStore>(
     predicate_wavelet_files: BitIndexFiles<F>,
 ) -> io::Result<usize> {
     let (_, width) = logarray_file_get_length_and_width(&s_p_nums_file)?;
-    let bits_len: usize = bitarray_len_from_file(&sp_o_bits_file)
-        ?
-        .try_into()
-        .unwrap();
+    let bits_len: usize = bitarray_len_from_file(&sp_o_bits_file)?.try_into().unwrap();
     let predicate_wavelet_maps = predicate_wavelet_files.map_all()?;
     let wavelet_bits = predicate_wavelet_maps.into();
     let wtree = WaveletTree::from_parts(wavelet_bits, width);
@@ -2658,7 +2469,10 @@ mod tests {
         fn new() -> io::Result<Self> {
             let mut path = std::env::temp_dir();
             let random_name: [u32; 2] = rand::random();
-            path.push(format!("terminus-test-{:08x}{:08x}", random_name[0], random_name[1]));
+            path.push(format!(
+                "terminus-test-{:08x}{:08x}",
+                random_name[0], random_name[1]
+            ));
             std::fs::create_dir_all(&path)?;
             Ok(TempDir(path))
         }
@@ -2678,34 +2492,40 @@ mod tests {
     // these tests are for both the memory store and the directory store
     // They test functionality that should really work for both
 
-    static BASE_TRIPLES: LazyLock<Vec<ValueTriple>> = LazyLock::new(|| vec![
-        ValueTriple::new_string_value("cow", "says", "moo"),
-        ValueTriple::new_string_value("cow", "says", "mooo"),
-        ValueTriple::new_node("cow", "likes", "duck"),
-        ValueTriple::new_node("cow", "likes", "pig"),
-        ValueTriple::new_string_value("cow", "name", "clarabelle"),
-        ValueTriple::new_string_value("pig", "says", "oink"),
-        ValueTriple::new_node("pig", "hates", "cow"),
-        ValueTriple::new_string_value("duck", "says", "quack"),
-        ValueTriple::new_node("duck", "hates", "cow"),
-        ValueTriple::new_node("duck", "hates", "pig"),
-        ValueTriple::new_string_value("duck", "name", "donald"),
-    ]);
-    static CHILD_ADDITION_TRIPLES: LazyLock<Vec<ValueTriple>> = LazyLock::new(|| vec![
-        ValueTriple::new_string_value("cow", "says", "moooo"),
-        ValueTriple::new_string_value("cow", "says", "mooooo"),
-        ValueTriple::new_node("cow", "likes", "horse"),
-        ValueTriple::new_node("pig", "likes", "platypus"),
-        ValueTriple::new_node("duck", "hates", "platypus"),
-    ]);
-    static CHILD_REMOVAL_TRIPLES: LazyLock<Vec<ValueTriple>> = LazyLock::new(|| vec![
-        ValueTriple::new_string_value("cow", "says", "mooo"),
-        ValueTriple::new_string_value("cow", "name", "clarabelle"),
-        ValueTriple::new_node("pig", "hates", "cow"),
-        ValueTriple::new_node("duck", "hates", "cow"),
-        ValueTriple::new_node("duck", "hates", "pig"),
-        ValueTriple::new_string_value("duck", "name", "donald"),
-    ]);
+    static BASE_TRIPLES: LazyLock<Vec<ValueTriple>> = LazyLock::new(|| {
+        vec![
+            ValueTriple::new_string_value("cow", "says", "moo"),
+            ValueTriple::new_string_value("cow", "says", "mooo"),
+            ValueTriple::new_node("cow", "likes", "duck"),
+            ValueTriple::new_node("cow", "likes", "pig"),
+            ValueTriple::new_string_value("cow", "name", "clarabelle"),
+            ValueTriple::new_string_value("pig", "says", "oink"),
+            ValueTriple::new_node("pig", "hates", "cow"),
+            ValueTriple::new_string_value("duck", "says", "quack"),
+            ValueTriple::new_node("duck", "hates", "cow"),
+            ValueTriple::new_node("duck", "hates", "pig"),
+            ValueTriple::new_string_value("duck", "name", "donald"),
+        ]
+    });
+    static CHILD_ADDITION_TRIPLES: LazyLock<Vec<ValueTriple>> = LazyLock::new(|| {
+        vec![
+            ValueTriple::new_string_value("cow", "says", "moooo"),
+            ValueTriple::new_string_value("cow", "says", "mooooo"),
+            ValueTriple::new_node("cow", "likes", "horse"),
+            ValueTriple::new_node("pig", "likes", "platypus"),
+            ValueTriple::new_node("duck", "hates", "platypus"),
+        ]
+    });
+    static CHILD_REMOVAL_TRIPLES: LazyLock<Vec<ValueTriple>> = LazyLock::new(|| {
+        vec![
+            ValueTriple::new_string_value("cow", "says", "mooo"),
+            ValueTriple::new_string_value("cow", "name", "clarabelle"),
+            ValueTriple::new_node("pig", "hates", "cow"),
+            ValueTriple::new_node("duck", "hates", "cow"),
+            ValueTriple::new_node("duck", "hates", "pig"),
+            ValueTriple::new_string_value("duck", "name", "donald"),
+        ]
+    });
 
     fn example_base_layer<S: LayerStore>(
         store: &S,
@@ -2820,18 +2640,11 @@ mod tests {
         child_layer_counts(&store, false).unwrap();
     }
 
-    fn base_layer_addition_exists<S: LayerStore>(
-        store: &S,
-        invalidate: bool,
-    ) -> io::Result<()> {
+    fn base_layer_addition_exists<S: LayerStore>(store: &S, invalidate: bool) -> io::Result<()> {
         let (name, _layer, triples) = example_base_layer(store, invalidate)?;
 
         for t in triples.values() {
-            assert!(
-                store
-                    .triple_addition_exists(name, t.subject, t.predicate, t.object)
-                    ?
-            );
+            assert!(store.triple_addition_exists(name, t.subject, t.predicate, t.object)?);
         }
 
         assert!(!store.triple_addition_exists(name, 42, 42, 42)?);
@@ -2888,8 +2701,7 @@ mod tests {
         assert_eq!(5, triples.len());
 
         let result: Vec<_> = store
-            .triple_additions_s(name, triples[0].subject)
-            ?
+            .triple_additions_s(name, triples[0].subject)?
             .collect();
         assert_eq!(triples, result);
 
@@ -2924,16 +2736,11 @@ mod tests {
         assert_eq!(2, triples.len());
 
         let result: Vec<_> = store
-            .triple_additions_sp(name, triples[0].subject, triples[0].predicate)
-            ?
+            .triple_additions_sp(name, triples[0].subject, triples[0].predicate)?
             .collect();
         assert_eq!(triples, result);
 
-        assert!(store
-            .triple_additions_sp(name, 42, 42)
-            ?
-            .next()
-            .is_none());
+        assert!(store.triple_additions_sp(name, 42, 42)?.next().is_none());
 
         Ok(())
     }
@@ -2964,8 +2771,7 @@ mod tests {
         assert_eq!(4, triples.len());
 
         let result: Vec<_> = store
-            .triple_additions_p(name, triples[0].predicate)
-            ?
+            .triple_additions_p(name, triples[0].predicate)?
             .collect();
         assert_eq!(triples, result);
 
@@ -2999,10 +2805,7 @@ mod tests {
         triples.sort();
         assert_eq!(2, triples.len());
 
-        let result: Vec<_> = store
-            .triple_additions_o(name, triples[0].object)
-            ?
-            .collect();
+        let result: Vec<_> = store.triple_additions_o(name, triples[0].object)?.collect();
         assert_eq!(triples, result);
 
         assert!(store.triple_additions_o(name, 42)?.next().is_none());
@@ -3029,11 +2832,7 @@ mod tests {
         assert!(!store.triple_removal_exists(name, 42, 42, 42)?);
         assert!(store.triple_removals(name)?.next().is_none());
         assert!(store.triple_removals_s(name, 42)?.next().is_none());
-        assert!(store
-            .triple_removals_sp(name, 42, 42)
-            ?
-            .next()
-            .is_none());
+        assert!(store.triple_removals_sp(name, 42, 42)?.next().is_none());
         assert!(store.triple_removals_p(name, 42)?.next().is_none());
         assert!(store.triple_removals_o(name, 42)?.next().is_none());
 
@@ -3053,18 +2852,11 @@ mod tests {
         base_layer_removals(&store, false).unwrap();
     }
 
-    fn child_layer_addition_exists<S: LayerStore>(
-        store: &S,
-        invalidate: bool,
-    ) -> io::Result<()> {
+    fn child_layer_addition_exists<S: LayerStore>(store: &S, invalidate: bool) -> io::Result<()> {
         let (name, _layer, triples, _) = example_child_layer(store, invalidate)?;
 
         for t in triples.values() {
-            assert!(
-                store
-                    .triple_addition_exists(name, t.subject, t.predicate, t.object)
-                    ?
-            );
+            assert!(store.triple_addition_exists(name, t.subject, t.predicate, t.object)?);
         }
 
         assert!(!store.triple_addition_exists(name, 42, 42, 42)?);
@@ -3121,8 +2913,7 @@ mod tests {
         assert_eq!(3, triples.len());
 
         let result: Vec<_> = store
-            .triple_additions_s(name, triples[0].subject)
-            ?
+            .triple_additions_s(name, triples[0].subject)?
             .collect();
         assert_eq!(triples, result);
 
@@ -3144,10 +2935,7 @@ mod tests {
         child_layer_additions_s(&store, false).unwrap();
     }
 
-    fn child_layer_additions_sp<S: LayerStore>(
-        store: &S,
-        invalidate: bool,
-    ) -> io::Result<()> {
+    fn child_layer_additions_sp<S: LayerStore>(store: &S, invalidate: bool) -> io::Result<()> {
         let (name, _layer, contents, _removals) = example_child_layer(store, invalidate)?;
 
         let mut triples: Vec<_> = contents
@@ -3160,16 +2948,11 @@ mod tests {
         assert_eq!(2, triples.len());
 
         let result: Vec<_> = store
-            .triple_additions_sp(name, triples[0].subject, triples[0].predicate)
-            ?
+            .triple_additions_sp(name, triples[0].subject, triples[0].predicate)?
             .collect();
         assert_eq!(triples, result);
 
-        assert!(store
-            .triple_additions_sp(name, 42, 42)
-            ?
-            .next()
-            .is_none());
+        assert!(store.triple_additions_sp(name, 42, 42)?.next().is_none());
 
         Ok(())
     }
@@ -3200,8 +2983,7 @@ mod tests {
         assert_eq!(2, triples.len());
 
         let result: Vec<_> = store
-            .triple_additions_p(name, triples[0].predicate)
-            ?
+            .triple_additions_p(name, triples[0].predicate)?
             .collect();
         assert_eq!(triples, result);
 
@@ -3235,10 +3017,7 @@ mod tests {
         triples.sort();
         assert_eq!(2, triples.len());
 
-        let result: Vec<_> = store
-            .triple_additions_o(name, triples[0].object)
-            ?
-            .collect();
+        let result: Vec<_> = store.triple_additions_o(name, triples[0].object)?.collect();
         assert_eq!(triples, result);
 
         assert!(store.triple_additions_o(name, 42)?.next().is_none());
@@ -3259,18 +3038,11 @@ mod tests {
         child_layer_additions_o(&store, false).unwrap();
     }
 
-    fn child_layer_removal_exists<S: LayerStore>(
-        store: &S,
-        invalidate: bool,
-    ) -> io::Result<()> {
+    fn child_layer_removal_exists<S: LayerStore>(store: &S, invalidate: bool) -> io::Result<()> {
         let (name, _layer, _additions, removals) = example_child_layer(store, invalidate)?;
 
         for t in removals.values() {
-            assert!(
-                store
-                    .triple_removal_exists(name, t.subject, t.predicate, t.object)
-                    ?
-            );
+            assert!(store.triple_removal_exists(name, t.subject, t.predicate, t.object)?);
         }
 
         assert!(!store.triple_removal_exists(name, 42, 42, 42)?);
@@ -3326,10 +3098,7 @@ mod tests {
         triples.sort();
         assert_eq!(3, triples.len());
 
-        let result: Vec<_> = store
-            .triple_removals_s(name, triples[0].subject)
-            ?
-            .collect();
+        let result: Vec<_> = store.triple_removals_s(name, triples[0].subject)?.collect();
         assert_eq!(triples, result);
 
         assert!(store.triple_removals_s(name, 42)?.next().is_none());
@@ -3363,16 +3132,11 @@ mod tests {
         assert_eq!(2, triples.len());
 
         let result: Vec<_> = store
-            .triple_removals_sp(name, triples[0].subject, triples[0].predicate)
-            ?
+            .triple_removals_sp(name, triples[0].subject, triples[0].predicate)?
             .collect();
         assert_eq!(triples, result);
 
-        assert!(store
-            .triple_removals_sp(name, 42, 42)
-            ?
-            .next()
-            .is_none());
+        assert!(store.triple_removals_sp(name, 42, 42)?.next().is_none());
 
         Ok(())
     }
@@ -3403,8 +3167,7 @@ mod tests {
         assert_eq!(3, triples.len());
 
         let result: Vec<_> = store
-            .triple_removals_p(name, triples[0].predicate)
-            ?
+            .triple_removals_p(name, triples[0].predicate)?
             .collect();
         assert_eq!(triples, result);
 
@@ -3438,10 +3201,7 @@ mod tests {
         triples.sort();
         assert_eq!(2, triples.len());
 
-        let result: Vec<_> = store
-            .triple_removals_o(name, triples[0].object)
-            ?
-            .collect();
+        let result: Vec<_> = store.triple_removals_o(name, triples[0].object)?.collect();
         assert_eq!(triples, result);
 
         assert!(store.triple_removals_o(name, 42)?.next().is_none());

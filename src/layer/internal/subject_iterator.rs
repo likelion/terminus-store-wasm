@@ -506,9 +506,7 @@ mod tests {
         builder.add_triple(5, 3, 6).unwrap();
         builder.finalize().unwrap();
 
-        let layer = BaseLayer::load_from_files([1, 2, 3, 4, 5], &files)
-            
-            .unwrap();
+        let layer = BaseLayer::load_from_files([1, 2, 3, 4, 5], &files).unwrap();
 
         let triples: Vec<_> = layer.internal_triple_additions().collect();
 
@@ -540,9 +538,7 @@ mod tests {
         builder.add_triple(5, 3, 6).unwrap();
         builder.finalize().unwrap();
 
-        BaseLayer::load_from_files([1, 2, 3, 4, 5], &files)
-            
-            .unwrap()
+        BaseLayer::load_from_files([1, 2, 3, 4, 5], &files).unwrap()
     }
 
     #[test]
@@ -615,9 +611,7 @@ mod tests {
         builder.add_triple(5, 3, 6).unwrap();
         builder.finalize().unwrap();
 
-        let layer = BaseLayer::load_from_files([1, 2, 3, 4, 5], &files)
-            
-            .unwrap();
+        let layer = BaseLayer::load_from_files([1, 2, 3, 4, 5], &files).unwrap();
 
         let triples: Vec<_> = layer.internal_triple_additions().seek_subject(2).collect();
 
@@ -652,9 +646,7 @@ mod tests {
         builder.add_triple(5, 3, 6).unwrap();
         builder.finalize().unwrap();
 
-        BaseLayer::load_from_files([1, 2, 3, 4, 5], &files)
-            
-            .unwrap()
+        BaseLayer::load_from_files([1, 2, 3, 4, 5], &files).unwrap()
     }
 
     #[test]
@@ -817,9 +809,8 @@ mod tests {
 
         let child_files = child_layer_files();
 
-        let child_builder = ChildLayerFileBuilder::from_files(parent.clone(), &child_files)
-            
-            .unwrap();
+        let child_builder =
+            ChildLayerFileBuilder::from_files(parent.clone(), &child_files).unwrap();
         let mut builder = child_builder.into_phase2().unwrap();
         builder.add_triple(1, 2, 3).unwrap();
         builder.add_triple(3, 3, 4).unwrap();
@@ -830,7 +821,6 @@ mod tests {
         builder.finalize().unwrap();
 
         ChildLayer::load_from_files([5, 4, 3, 2, 1], parent, &child_files)
-            
             .unwrap()
             .into()
     }
@@ -1024,10 +1014,7 @@ mod tests {
         builder.add_value_triple(ValueTriple::new_string_value("horse", "says", "neigh"));
         builder.commit_boxed().unwrap();
 
-        (
-            child1_name,
-            store.get_layer(child3_name).unwrap().unwrap(),
-        )
+        (child1_name, store.get_layer(child3_name).unwrap().unwrap())
     }
 
     #[test]

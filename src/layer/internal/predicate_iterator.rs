@@ -208,9 +208,8 @@ mod tests {
 
         let child_files = child_layer_files();
 
-        let child_builder = ChildLayerFileBuilder::from_files(parent.clone(), &child_files)
-            
-            .unwrap();
+        let child_builder =
+            ChildLayerFileBuilder::from_files(parent.clone(), &child_files).unwrap();
         let mut builder = child_builder.into_phase2().unwrap();
         builder.add_triple(1, 2, 3).unwrap();
         builder.add_triple(3, 3, 4).unwrap();
@@ -222,7 +221,6 @@ mod tests {
         builder.finalize().unwrap();
 
         ChildLayer::load_from_files([5, 4, 3, 2, 1], parent, &child_files)
-            
             .unwrap()
             .into()
     }

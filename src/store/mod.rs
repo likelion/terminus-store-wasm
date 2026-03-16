@@ -18,7 +18,6 @@ use tdb_succinct_wasm::TypedDictEntry;
 
 use std::io;
 
-
 /// A store, storing a set of layers and database labels pointing to these layers.
 #[derive(Clone)]
 pub struct Store {
@@ -230,10 +229,7 @@ impl StoreLayerBuilder {
             Some(base) => {
                 base.triples().for_each(|b| {
                     if let Some(t) = base.id_triple_to_string(&b) {
-                        if others
-                            .iter()
-                            .any(|o| !o.value_triple_exists(&t))
-                        {
+                        if others.iter().any(|o| !o.value_triple_exists(&t)) {
                             self.remove_value_triple(t).unwrap();
                         }
                     }
@@ -289,8 +285,7 @@ impl StoreLayer {
         let layer = self
             .store
             .layer_store
-            .create_child_layer(self.layer.name())
-            ?;
+            .create_child_layer(self.layer.name())?;
 
         Ok(StoreLayerBuilder::wrap(layer, self.store.clone()))
     }
@@ -315,15 +310,10 @@ impl StoreLayer {
         let layer_opt = self.store.layer_store.get_layer(self.name())?;
         let layer =
             layer_opt.ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "layer not found"))?;
-        let name = self
-            .store
-            .layer_store
-            .squash_upto(layer, upto.name())
-            ?;
+        let name = self.store.layer_store.squash_upto(layer, upto.name())?;
         Ok(self
             .store
-            .get_layer_from_id(name)
-            ?
+            .get_layer_from_id(name)?
             .expect("layer that was just created doesn't exist"))
     }
 
@@ -342,8 +332,7 @@ impl StoreLayer {
         let name = self.store.layer_store.squash(layer)?;
         Ok(self
             .store
-            .get_layer_from_id(name)
-            ?
+            .get_layer_from_id(name)?
             .expect("layer that was just created doesn't exist"))
     }
 
@@ -410,7 +399,6 @@ impl StoreLayer {
         self.store
             .layer_store
             .triple_addition_exists(self.layer.name(), subject, predicate, object)
-            
     }
 
     /// Returns a future that yields true if this triple has been removed in this layer, or false if it doesn't.
@@ -426,7 +414,6 @@ impl StoreLayer {
         self.store
             .layer_store
             .triple_removal_exists(self.layer.name(), subject, predicate, object)
-            
     }
 
     /// Returns a future that yields an iterator over all layer additions.
@@ -434,11 +421,7 @@ impl StoreLayer {
     /// Since this operation will involve io when this layer is a
     /// rollup layer, io errors may occur.
     pub fn triple_additions(&self) -> io::Result<Box<dyn Iterator<Item = IdTriple> + Send>> {
-        let result = self
-            .store
-            .layer_store
-            .triple_additions(self.layer.name())
-            ?;
+        let result = self.store.layer_store.triple_additions(self.layer.name())?;
 
         Ok(Box::new(result) as Box<dyn Iterator<Item = _> + Send>)
     }
@@ -448,11 +431,7 @@ impl StoreLayer {
     /// Since this operation will involve io when this layer is a
     /// rollup layer, io errors may occur.
     pub fn triple_removals(&self) -> io::Result<Box<dyn Iterator<Item = IdTriple> + Send>> {
-        let result = self
-            .store
-            .layer_store
-            .triple_removals(self.layer.name())
-            ?;
+        let result = self.store.layer_store.triple_removals(self.layer.name())?;
 
         Ok(Box::new(result) as Box<dyn Iterator<Item = _> + Send>)
     }
@@ -468,7 +447,6 @@ impl StoreLayer {
         self.store
             .layer_store
             .triple_additions_s(self.layer.name(), subject)
-            
     }
 
     /// Returns a future that yields an iterator over all layer removals that share a particular subject.
@@ -482,7 +460,6 @@ impl StoreLayer {
         self.store
             .layer_store
             .triple_removals_s(self.layer.name(), subject)
-            
     }
 
     /// Returns a future that yields an iterator over all layer additions that share a particular subject and predicate.
@@ -497,7 +474,6 @@ impl StoreLayer {
         self.store
             .layer_store
             .triple_additions_sp(self.layer.name(), subject, predicate)
-            
     }
 
     /// Returns a future that yields an iterator over all layer removals that share a particular subject and predicate.
@@ -512,7 +488,6 @@ impl StoreLayer {
         self.store
             .layer_store
             .triple_removals_sp(self.layer.name(), subject, predicate)
-            
     }
 
     /// Returns a future that yields an iterator over all layer additions that share a particular predicate.
@@ -526,7 +501,6 @@ impl StoreLayer {
         self.store
             .layer_store
             .triple_additions_p(self.layer.name(), predicate)
-            
     }
 
     /// Returns a future that yields an iterator over all layer removals that share a particular predicate.
@@ -540,7 +514,6 @@ impl StoreLayer {
         self.store
             .layer_store
             .triple_removals_p(self.layer.name(), predicate)
-            
     }
 
     /// Returns a future that yields an iterator over all layer additions that share a particular object.
@@ -554,7 +527,6 @@ impl StoreLayer {
         self.store
             .layer_store
             .triple_additions_o(self.layer.name(), object)
-            
     }
 
     /// Returns a future that yields an iterator over all layer removals that share a particular object.
@@ -568,7 +540,6 @@ impl StoreLayer {
         self.store
             .layer_store
             .triple_removals_o(self.layer.name(), object)
-            
     }
 
     /// Returns a future that yields the amount of triples that this layer adds.
@@ -579,7 +550,6 @@ impl StoreLayer {
         self.store
             .layer_store
             .triple_layer_addition_count(self.layer.name())
-            
     }
 
     /// Returns a future that yields the amount of triples that this layer removes.
@@ -590,7 +560,6 @@ impl StoreLayer {
         self.store
             .layer_store
             .triple_layer_removal_count(self.layer.name())
-            
     }
 
     /// Returns a future that yields a vector of layer stack names describing the history of this layer, starting from the base layer up to and including the name of this layer itself.
@@ -598,7 +567,6 @@ impl StoreLayer {
         self.store
             .layer_store
             .retrieve_layer_stack_names(self.name())
-            
     }
 }
 
@@ -778,20 +746,17 @@ impl NamedGraph {
 
         let set_is_ok = match label.layer {
             None => true,
-            Some(retrieved_layer_name) => {
-                self.store
-                    .layer_store
-                    .layer_is_ancestor_of(layer_name, retrieved_layer_name)
-                    ?
-            }
+            Some(retrieved_layer_name) => self
+                .store
+                .layer_store
+                .layer_is_ancestor_of(layer_name, retrieved_layer_name)?,
         };
 
         if set_is_ok {
             Ok(self
                 .store
                 .label_store
-                .set_label(&label, layer_name)
-                ?
+                .set_label(&label, layer_name)?
                 .is_some())
         } else {
             Ok(false)
@@ -815,8 +780,7 @@ impl NamedGraph {
                     if self
                         .store
                         .label_store
-                        .set_label(&label, layer_name)
-                        ?
+                        .set_label(&label, layer_name)?
                         .is_some()
                     {
                         return Ok(());
@@ -827,11 +791,7 @@ impl NamedGraph {
     }
 
     /// Set the database label to the given layer, even if it is not a valid ancestor. Also checks given version, and if it doesn't match, the update won't happen and false will be returned.
-    pub fn force_set_head_version(
-        &self,
-        layer: &StoreLayer,
-        version: u64,
-    ) -> io::Result<bool> {
+    pub fn force_set_head_version(&self, layer: &StoreLayer, version: u64) -> io::Result<bool> {
         let layer_name = layer.name();
         let label = self.store.label_store.get_label(&self.label)?;
         match label {
@@ -843,8 +803,7 @@ impl NamedGraph {
                     Ok(self
                         .store
                         .label_store
-                        .set_label(&label, layer_name)
-                        ?
+                        .set_label(&label, layer_name)?
                         .is_some())
                 }
             }
@@ -907,11 +866,7 @@ impl Store {
         StoreLayerBuilder::new(self.clone())
     }
 
-    pub fn merge_base_layers(
-        &self,
-        layers: &[[u32; 5]],
-        temp_dir: &Path,
-    ) -> io::Result<[u32; 5]> {
+    pub fn merge_base_layers(&self, layers: &[[u32; 5]], temp_dir: &Path) -> io::Result<[u32; 5]> {
         self.layer_store.merge_base_layer(layers, temp_dir)
     }
 
@@ -1226,7 +1181,6 @@ mod tests {
         assert_eq!(squashed_layer.parent_name().unwrap(), base_layer.name());
         let additions: Vec<_> = squashed_layer
             .triple_additions()
-            
             .unwrap()
             .map(|t| squashed_layer.id_triple_to_string(&t).unwrap())
             .collect();
@@ -1243,7 +1197,6 @@ mod tests {
         );
         let removals: Vec<_> = squashed_layer
             .triple_removals()
-            
             .unwrap()
             .map(|t| squashed_layer.id_triple_to_string(&t).unwrap())
             .collect();
@@ -1327,7 +1280,6 @@ mod tests {
         final_layer.rollup_upto(&base_layer).unwrap();
         let final_rolled_layer = store
             .get_layer_from_id(final_layer.name())
-            
             .unwrap()
             .unwrap();
 
@@ -1406,7 +1358,6 @@ mod tests {
         final_layer.rollup_upto(&base_layer).unwrap();
         let final_rolled_layer = store
             .get_layer_from_id(final_layer.name())
-            
             .unwrap()
             .unwrap();
 
@@ -1414,7 +1365,6 @@ mod tests {
         assert_eq!(squashed_layer.parent_name().unwrap(), base_layer.name());
         let additions: Vec<_> = squashed_layer
             .triple_additions()
-            
             .unwrap()
             .map(|t| squashed_layer.id_triple_to_string(&t).unwrap())
             .collect();
@@ -1431,7 +1381,6 @@ mod tests {
         );
         let removals: Vec<_> = squashed_layer
             .triple_removals()
-            
             .unwrap()
             .map(|t| squashed_layer.id_triple_to_string(&t).unwrap())
             .collect();
@@ -1494,7 +1443,6 @@ mod tests {
         let squashed = store
             .layer_store
             .get_layer(squashed.name())
-            
             .unwrap()
             .unwrap();
         let nodes: Vec<_> = squashed
@@ -1579,7 +1527,6 @@ mod tests {
         let squashed = store
             .layer_store
             .get_layer(squashed.name())
-            
             .unwrap()
             .unwrap();
         let nodes: Vec<_> = squashed
@@ -1773,15 +1720,9 @@ mod tests {
         let diffed = diff_builder.commit().unwrap();
 
         // Result should match target: cat + dog, no cow
-        assert!(
-            diffed.value_triple_exists(&ValueTriple::new_string_value("cat", "says", "meow"))
-        );
-        assert!(
-            diffed.value_triple_exists(&ValueTriple::new_string_value("dog", "says", "woof"))
-        );
-        assert!(
-            !diffed.value_triple_exists(&ValueTriple::new_string_value("cow", "says", "moo"))
-        );
+        assert!(diffed.value_triple_exists(&ValueTriple::new_string_value("cat", "says", "meow")));
+        assert!(diffed.value_triple_exists(&ValueTriple::new_string_value("dog", "says", "woof")));
+        assert!(!diffed.value_triple_exists(&ValueTriple::new_string_value("cow", "says", "moo")));
     }
 
     #[test]
@@ -1804,12 +1745,8 @@ mod tests {
         let diffed = diff_builder.commit().unwrap();
 
         // All target triples should be added
-        assert!(
-            diffed.value_triple_exists(&ValueTriple::new_string_value("dog", "says", "woof"))
-        );
-        assert!(
-            diffed.value_triple_exists(&ValueTriple::new_string_value("cat", "says", "meow"))
-        );
+        assert!(diffed.value_triple_exists(&ValueTriple::new_string_value("dog", "says", "woof")));
+        assert!(diffed.value_triple_exists(&ValueTriple::new_string_value("cat", "says", "meow")));
     }
 
     #[test]
@@ -1836,12 +1773,8 @@ mod tests {
             .unwrap();
         let merged = merge_builder.commit().unwrap();
 
-        assert!(
-            merged.value_triple_exists(&ValueTriple::new_string_value("dog", "says", "woof"))
-        );
-        assert!(
-            merged.value_triple_exists(&ValueTriple::new_string_value("cat", "says", "meow"))
-        );
+        assert!(merged.value_triple_exists(&ValueTriple::new_string_value("dog", "says", "woof")));
+        assert!(merged.value_triple_exists(&ValueTriple::new_string_value("cat", "says", "meow")));
     }
 
     #[test]
