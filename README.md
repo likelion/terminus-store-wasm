@@ -1,6 +1,6 @@
 # terminus-store-wasm, a synchronous data store for triple data
 
-[![Build Status](https://github.com/likelion/terminus-store-wasm/workflows/Build/badge.svg)](https://github.com/likelion/terminus-store-wasm/actions)
+[![Build Status](https://github.com/likelion/terminus-store-wasm/workflows/Build%20and%20test/badge.svg)](https://github.com/likelion/terminus-store-wasm/actions)
 [![codecov](https://codecov.io/github/likelion/terminus-store-wasm/branch/main/graph/badge.svg)](https://app.codecov.io/github/likelion/terminus-store-wasm)
 
 ## Overview
