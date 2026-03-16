@@ -26,7 +26,8 @@ lru = "0.16.3"
 bitvec = "1.0.1"
 num-derive = "0.4.2"
 num-traits = "0.2.19"
-tdb-succinct-wasm = { path = "../tdb-succinct-wasm" }
+tdb-succinct-wasm = { git="https://github.com/likelion/tdb-succinct-wasm", branch="main"}
+#tdb-succinct-wasm = { path = "../tdb-succinct-wasm" }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 getrandom = { version = "0.4.2", features = ["wasm_js"] }
@@ -43,4 +44,4 @@ web-sys = { version = "0.3", features = [
 
 [dev-dependencies]
 proptest = "1.10.0"
-tempfile = "3.26.0"
+tempfile = "3.27.0"
