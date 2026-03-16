@@ -41,4 +41,9 @@ jobs:
           --ignore-not-existing --ignore "/*" -o lcov.info
 
     - name: Upload coverage
-      run: bash <(curl -s https://codecov.io/bash) -f lcov.info
+      uses: codecov/codecov-action@v4
+      with:
+        files: lcov.info
+        fail_ci_if_error: false
+      env:
+        CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}

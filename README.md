@@ -1,9 +1,7 @@
-# terminusdb-store, a tokio-enabled data store for triple data
+# terminus-store-wasm, a synchronous data store for triple data
 
-[![Build Status](https://github.com/terminusdb/terminusdb-store/workflows/Build/badge.svg)](https://github.com/terminusdb/terminusdb-store/actions)
-[![Crate](https://img.shields.io/crates/v/terminus-store.svg)](https://crates.io/crates/terminus-store)
-[![Documentation](https://docs.rs/terminus-store/badge.svg)](https://docs.rs/terminus-store/)
-[![codecov](https://codecov.io/gh/terminusdb/terminusdb-store/branch/main/graph/badge.svg)](https://codecov.io/gh/terminusdb/terminusdb-store)
+[![Build Status](https://github.com/likelion/terminus-store-wasm/workflows/Build/badge.svg)](https://github.com/likelion/terminus-store-wasm/actions)
+[![codecov](https://codecov.io/gh/likelion/terminus-store-wasm/branch/main/graph/badge.svg)](https://codecov.io/gh/likelion/terminus-store-wasm)
 
 ## Overview
 This library implements a way to store triple data - data that
