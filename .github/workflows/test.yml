@@ -51,6 +51,12 @@ jobs:
           gmp-devel
           mingw-w64-x86_64-gcc
           mingw-w64-x86_64-rust
+    - name: Configure git fetch for Windows
+      if: ${{ matrix.os == 'windows-latest' }}
+      run: |
+        git config --global net.git-fetch-with-cli true
+        mkdir -p ~/.cargo && echo -e '[net]\ngit-fetch-with-cli = true' >> ~/.cargo/config.toml
+
     - name: Build the crate
       run: cargo build --verbose
 
