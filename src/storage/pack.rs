@@ -73,7 +73,6 @@ impl<T: PersistentLayerStore> Packable for T {
             layer_id_set.insert(id_str);
         }
 
-        let _handle_placeholder = (); // tokio runtime no longer needed
         {
             let cursor = io::Cursor::new(pack);
             let tar = GzDecoder::new(cursor);

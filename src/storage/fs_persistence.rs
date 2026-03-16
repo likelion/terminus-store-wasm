@@ -51,12 +51,11 @@ impl FsPersistence {
         let version_str = lines
             .next()
             .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "missing version line"))?;
-        let layer =
-            if layer_str == "none" {
-                None
-            } else {
-                Some(string_to_name(layer_str)?)
-            };
+        let layer = if layer_str == "none" {
+            None
+        } else {
+            Some(string_to_name(layer_str)?)
+        };
         let version: u64 = version_str
             .parse()
             .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "invalid version"))?;

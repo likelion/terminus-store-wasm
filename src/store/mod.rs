@@ -26,7 +26,7 @@ pub struct Store {
 /// The SimpleLayerBuilder requires one to have a mutable reference to
 /// the underlying LayerBuilder, and on commit it will be
 /// consumed. This builder only requires an immutable reference, and
-/// uses a futures-aware read-write lock to synchronize access to it
+/// uses a std::sync::RwLock to synchronize access to it
 /// between threads. Also, rather than consuming itself on commit,
 /// this wrapper will simply mark itself as having committed,
 /// returning errors on further calls.
