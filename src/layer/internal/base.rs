@@ -7,7 +7,7 @@ use super::super::builder::*;
 use super::super::id_map::*;
 use super::super::layer::*;
 use crate::layer::InternalLayer;
-use crate::{chrono_log, storage::*};
+use crate::storage::*;
 use tdb_succinct_wasm::*;
 
 use std::io;
@@ -360,14 +360,14 @@ impl<F: 'static + FileLoad + FileStore> BaseLayerFileBuilderPhase2<F> {
     #[allow(dead_code)]
     pub(crate) fn partial_finalize(self) -> io::Result<BaseLayerFiles<F>> {
         self.builder.finalize()?;
-        chrono_log!("finalized base triples builder");
+        // finalized base triples builder
 
         Ok(self.files)
     }
 
     pub fn finalize(self) -> io::Result<()> {
         self.builder.finalize()?;
-        chrono_log!("finalized base triples builder");
+        // finalized base triples builder
         let s_p_adjacency_list_files = self.files.s_p_adjacency_list_files.clone();
         let sp_o_adjacency_list_files = self.files.sp_o_adjacency_list_files.clone();
         let o_ps_adjacency_list_files = self.files.o_ps_adjacency_list_files.clone();
@@ -380,7 +380,7 @@ impl<F: 'static + FileLoad + FileStore> BaseLayerFileBuilderPhase2<F> {
             predicate_wavelet_tree_files,
         )?;
 
-        chrono_log!("finalized base builder");
+        // finalized base builder
 
         Ok(())
     }

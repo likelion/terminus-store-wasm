@@ -3,7 +3,7 @@ use std::io;
 use bytes::{Bytes, BytesMut};
 
 use super::layer::*;
-use crate::{chrono_log, storage::*};
+use crate::storage::*;
 use tdb_succinct_wasm::util::heap_sorted_iter;
 use tdb_succinct_wasm::*;
 
@@ -352,7 +352,7 @@ pub fn build_object_index_from_direct_files<
     o_ps_files: AdjacencyListFiles<F>,
     objects_file: Option<F>,
 ) -> io::Result<()> {
-    chrono_log!("starting object index build");
+    // starting object index build
     let build_sparse_index = objects_file.is_some();
     let (count, spo_width) = logarray_file_get_length_and_width(&sp_o_nums_file)?;
     // Load the adjacency list from the nums and bits files
@@ -372,7 +372,7 @@ pub fn build_object_index_from_direct_files<
     let mut aj_iter = (0..aj.right_count()).map(|i| aj.pair_at_pos(i as u64));
     let mut pairs = Vec::with_capacity(std::cmp::min(count, SINGLE_SORT_LIMIT) as usize);
     let mut greatest_sp = 0;
-    chrono_log!("opened sp_o iterator");
+    // opened sp_o iterator
     let mut tally: u64 = 0;
     let mut temp_arrays: Vec<(LogArray, LogArray)> = Vec::new();
     // gather up pairs
@@ -380,15 +380,8 @@ pub fn build_object_index_from_direct_files<
         greatest_sp = sp;
         pairs.push((object, sp));
         tally += 1;
-        if tally % 10000000 == 0 {
-            chrono_log!(
-                "collected {tally} pairs for o_ps index ({}%)",
-                (tally * 100 / count)
-            );
-        }
-
         if tally % SINGLE_SORT_LIMIT == 0 {
-            chrono_log!("collect currently gathered elements into a logarray");
+            // collect currently gathered elements into a logarray
             pairs.sort_unstable();
             let mut sp_file = BytesMut::with_capacity(0);
             let mut o_file = BytesMut::with_capacity(0);
@@ -411,12 +404,12 @@ pub fn build_object_index_from_direct_files<
             pairs.clear();
         }
     }
-    chrono_log!("collected object pairs");
+    // collected object pairs
 
     // sort_unstable unfortunately can run out of stack for very
     // large sorts. If so, we have to do something else.
     if pairs.len() as u64 > SINGLE_SORT_LIMIT {
-        chrono_log!("perform multi sort");
+        // perform multi sort
         let mut tally: u64 = 0;
         while tally < pairs.len() as u64 {
             let end = std::cmp::min(count as usize, (tally + SINGLE_SORT_LIMIT) as usize);
@@ -424,15 +417,15 @@ pub fn build_object_index_from_direct_files<
             slice.sort_unstable();
             tally += SINGLE_SORT_LIMIT;
         }
-        chrono_log!("perform final sort");
+        // perform final sort
         // we use the normal sort as it is fast for cases where you
         // have a bunch of appended sorted slices.
         pairs.sort();
     } else {
-        chrono_log!("perform single sort");
+        // perform single sort
         pairs.sort_unstable();
     }
-    chrono_log!("sorted object pairs");
+    // sorted object pairs
 
     let aj_width = util::calculate_width(greatest_sp);
     let mut o_ps_adjacency_list_builder = AdjacencyListBuilder::new(
@@ -483,10 +476,10 @@ pub fn build_object_index_from_direct_files<
     } else {
         o_ps_adjacency_list_builder.push_all(merged_iters)?;
     }
-    chrono_log!("added object pairs to adjacency list builder");
+    // added object pairs to adjacency list builder
 
     o_ps_adjacency_list_builder.finalize()?;
-    chrono_log!("finalized object index");
+    // finalized object index
 
     Ok(())
 }
@@ -526,14 +519,14 @@ pub fn build_indexes<FLoad: 'static + FileLoad, F: 'static + FileLoad + FileStor
     wavelet_files: BitIndexFiles<F>,
 ) -> io::Result<()> {
     build_object_index(sp_o_files, o_ps_files, objects_file)?;
-    chrono_log!("built object index");
+    // built object index
     build_predicate_index(
         s_p_files.nums_file,
         wavelet_files.bits_file,
         wavelet_files.blocks_file,
         wavelet_files.sblocks_file,
     )?;
-    chrono_log!("built predicate index");
+    // built predicate index
 
     Ok(())
 }

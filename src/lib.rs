@@ -20,10 +20,8 @@
 //! terminus-store-wasm. They are useful for implementing new storage
 //! backends, or writing analysis and recovery tools.
 pub mod layer;
-#[macro_use]
-pub(crate) mod logging;
 pub mod storage;
 pub mod store;
 
 pub use layer::{IdTriple, Layer, ObjectType, ValueTriple};
-pub use store::{open_directory_store, open_memory_store};
+pub use store::{open_directory_store, open_memory_store, open_persistence_store};
