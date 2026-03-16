@@ -26,7 +26,7 @@ lru = "0.16.3"
 bitvec = "1.0.1"
 num-derive = "0.4.2"
 num-traits = "0.2.19"
-tdb-succinct-wasm = { git="https://github.com/likelion/tdb-succinct-wasm", branch="main"}
+tdb-succinct-wasm = { version = "0.1.2", git="https://github.com/likelion/tdb-succinct-wasm", branch="main"}
 #tdb-succinct-wasm = { path = "../tdb-succinct-wasm" }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
