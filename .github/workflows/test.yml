@@ -51,10 +51,8 @@ jobs:
           gmp-devel
           mingw-w64-x86_64-gcc
           mingw-w64-x86_64-rust
-    # Create the crate and build it. We use this instead of `cargo build`,
-    # because it can help catch errors in the `Cargo.toml`.
     - name: Build the crate
-      run: cargo package --verbose --no-verify
+      run: cargo build --verbose
 
     - name: Build and run tests
       run: cargo test --verbose
