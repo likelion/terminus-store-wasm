@@ -13,7 +13,7 @@ jobs:
   build-and-test-arm64:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
 
     - uses: uraimo/run-on-arch-action@v2
       name: Run tests on arm64

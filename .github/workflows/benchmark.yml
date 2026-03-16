@@ -14,14 +14,12 @@ jobs:
   benchmark:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v4
 
     - name: Install nightly toolchain
-      uses: actions-rs/toolchain@v1
-      with:
-        toolchain: nightly
-        override: true
-        components: llvm-tools-preview
+      run: |
+        rustup toolchain install nightly --component llvm-tools-preview
+        rustup override set nightly
 
     # Always build the benchmarks to make sure they compile.
     - name: Build benchmarks

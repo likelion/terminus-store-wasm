@@ -8,18 +8,17 @@ on:
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
+  CARGO_NET_GIT_FETCH_WITH_CLI: true
 
 jobs:
   clippy:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v4
 
-      - uses: actions-rs/clippy-check@v1
+      - name: Run clippy
         continue-on-error: true
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          args: --all-features
+        run: cargo clippy --all-features -- -D warnings
 
   build-and-test:
     strategy:
@@ -36,28 +35,22 @@ jobs:
         shell: ${{ matrix.shell}} {0}
     runs-on: ${{ matrix.os }}
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
 
     - name: Install msys2 for Windows
       if: ${{ matrix.os == 'windows-latest' }}
       uses: msys2/setup-msys2@v2
       with:
         update: true
+        path-type: inherit
         install: >-
           diffutils
           m4
           make
-          git
           gmp
           gmp-devel
           mingw-w64-x86_64-gcc
           mingw-w64-x86_64-rust
-    - name: Configure git fetch for Windows
-      if: ${{ matrix.os == 'windows-latest' }}
-      run: |
-        mkdir -p ~/.cargo
-        printf '[net]\ngit-fetch-with-cli = true\n' >> ~/.cargo/config.toml
-
     - name: Build the crate
       run: cargo build --verbose
 
