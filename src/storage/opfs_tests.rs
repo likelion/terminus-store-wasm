@@ -27,9 +27,7 @@ use super::persistence::{LabelPersistence, LayerPersistence};
 #[wasm_bindgen(module = "/src/opfs_helpers.js")]
 extern "C" {
     #[wasm_bindgen(catch)]
-    fn opfs_list_entries(
-        dir: &web_sys::FileSystemDirectoryHandle,
-    ) -> Result<Array, JsValue>;
+    fn opfs_list_entries(dir: &web_sys::FileSystemDirectoryHandle) -> Result<Array, JsValue>;
 
     #[wasm_bindgen(catch)]
     fn opfs_remove_entry(
@@ -72,7 +70,9 @@ extern "C" {
     /// Block on a JS Promise synchronously using Atomics.wait.
     /// This must be called from a Worker thread.
     #[wasm_bindgen(catch, js_name = "opfs_block_on_promise")]
-    fn block_on_promise(promise: js_sys::Promise) -> Result<web_sys::FileSystemDirectoryHandle, JsValue>;
+    fn block_on_promise(
+        promise: js_sys::Promise,
+    ) -> Result<web_sys::FileSystemDirectoryHandle, JsValue>;
 }
 
 // ── Cleanup helper ──────────────────────────────────────────────────
@@ -105,7 +105,9 @@ fn fresh_persistence() -> Result<OpfsPersistence, JsValue> {
 #[wasm_bindgen]
 pub fn test_opfs_smoke() -> Result<(), JsValue> {
     let persistence = fresh_persistence()?;
-    let layers = persistence.list_layers().map_err(|e| JsValue::from_str(&e.to_string()))?;
+    let layers = persistence
+        .list_layers()
+        .map_err(|e| JsValue::from_str(&e.to_string()))?;
     if !layers.is_empty() {
         return Err(JsValue::from_str(&format!(
             "expected empty layer list, got {} layers",
@@ -355,7 +357,11 @@ pub fn test_opfs_label_crud() -> Result<(), JsValue> {
         .get_label("mydb")
         .map_err(|e| JsValue::from_str(&e.to_string()))?;
     match fetched {
-        None => return Err(JsValue::from_str("get_label returned None for existing label")),
+        None => {
+            return Err(JsValue::from_str(
+                "get_label returned None for existing label",
+            ))
+        }
         Some(ref f) => {
             if f.name != label.name || f.version != label.version || f.layer != label.layer {
                 return Err(JsValue::from_str("get_label returned different label"));
@@ -369,7 +375,11 @@ pub fn test_opfs_label_crud() -> Result<(), JsValue> {
         .set_label(&label, Some(layer_id))
         .map_err(|e| JsValue::from_str(&e.to_string()))?;
     match updated {
-        None => return Err(JsValue::from_str("set_label returned None with correct version")),
+        None => {
+            return Err(JsValue::from_str(
+                "set_label returned None with correct version",
+            ))
+        }
         Some(ref u) => {
             if u.version != 1 {
                 return Err(JsValue::from_str(&format!(
@@ -397,7 +407,9 @@ pub fn test_opfs_label_crud() -> Result<(), JsValue> {
         .delete_label("mydb")
         .map_err(|e| JsValue::from_str(&e.to_string()))?;
     if !deleted {
-        return Err(JsValue::from_str("delete_label returned false for existing label"));
+        return Err(JsValue::from_str(
+            "delete_label returned false for existing label",
+        ));
     }
 
     // Verify get returns None after delete
@@ -413,7 +425,9 @@ pub fn test_opfs_label_crud() -> Result<(), JsValue> {
         .delete_label("mydb")
         .map_err(|e| JsValue::from_str(&e.to_string()))?;
     if deleted2 {
-        return Err(JsValue::from_str("delete_label returned true for non-existent label"));
+        return Err(JsValue::from_str(
+            "delete_label returned true for non-existent label",
+        ));
     }
 
     Ok(())
@@ -435,7 +449,11 @@ pub fn test_opfs_label_optimistic_concurrency() -> Result<(), JsValue> {
         .set_label(&label, Some(layer_id))
         .map_err(|e| JsValue::from_str(&e.to_string()))?;
     let updated = match updated {
-        None => return Err(JsValue::from_str("set_label with correct version returned None")),
+        None => {
+            return Err(JsValue::from_str(
+                "set_label with correct version returned None",
+            ))
+        }
         Some(u) => u,
     };
     if updated.version != 1 {
@@ -497,8 +515,8 @@ pub fn test_opfs_label_plaintext_roundtrip() -> Result<(), JsValue> {
     // Read the raw .label file bytes from the OPFS root
     let root = get_root()?;
     let raw_bytes = opfs_read_file(&root, "testlabel.label")?;
-    let content = String::from_utf8(raw_bytes.to_vec())
-        .map_err(|e| JsValue::from_str(&e.to_string()))?;
+    let content =
+        String::from_utf8(raw_bytes.to_vec()).map_err(|e| JsValue::from_str(&e.to_string()))?;
 
     // Expected format: "<version>\n<layer_hex>\n"
     let expected_hex = name_to_string(layer_id);
@@ -598,7 +616,9 @@ pub fn test_opfs_cross_backend_equivalence() -> Result<(), JsValue> {
         .map_err(|e| JsValue::from_str(&e.to_string()))?;
 
     if opfs_stale.is_some() || mem_stale.is_some() {
-        return Err(JsValue::from_str("stale set_label should return None on both"));
+        return Err(JsValue::from_str(
+            "stale set_label should return None on both",
+        ));
     }
 
     // List labels on both
@@ -638,7 +658,9 @@ pub fn test_opfs_cross_backend_equivalence() -> Result<(), JsValue> {
         .map_err(|e| JsValue::from_str(&e.to_string()))?;
 
     if opfs_after.is_some() || mem_after.is_some() {
-        return Err(JsValue::from_str("get_label after delete should be None on both"));
+        return Err(JsValue::from_str(
+            "get_label after delete should be None on both",
+        ));
     }
 
     Ok(())
@@ -693,10 +715,14 @@ pub fn test_opfs_e2e_store_workflow() -> Result<(), JsValue> {
         .ok_or_else(|| JsValue::from_str("head returned None after set_head"))?;
 
     if !head.value_triple_exists(&ValueTriple::new_string_value("alice", "name", "Alice")) {
-        return Err(JsValue::from_str("base layer missing triple: alice name Alice"));
+        return Err(JsValue::from_str(
+            "base layer missing triple: alice name Alice",
+        ));
     }
     if !head.value_triple_exists(&ValueTriple::new_node("alice", "knows", "bob")) {
-        return Err(JsValue::from_str("base layer missing triple: alice knows bob"));
+        return Err(JsValue::from_str(
+            "base layer missing triple: alice knows bob",
+        ));
     }
     if !head.value_triple_exists(&ValueTriple::new_string_value("bob", "name", "Bob")) {
         return Err(JsValue::from_str("base layer missing triple: bob name Bob"));

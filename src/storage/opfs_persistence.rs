@@ -67,9 +67,7 @@ extern "C" {
     ) -> Result<(), JsValue>;
 
     #[wasm_bindgen(catch)]
-    fn opfs_list_entries(
-        dir: &web_sys::FileSystemDirectoryHandle,
-    ) -> Result<Array, JsValue>;
+    fn opfs_list_entries(dir: &web_sys::FileSystemDirectoryHandle) -> Result<Array, JsValue>;
 
     #[wasm_bindgen(catch)]
     fn opfs_remove_entry(
