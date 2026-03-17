@@ -58,9 +58,13 @@ test-native:
 test-wasm: build
 	wasm-pack test --headless --chrome
 
-test-opfs: build
+test-opfs: build-opfs-tests
 	@echo "── OPFS integration tests (port $(OPFS_PORT))"
 	PORT=$(OPFS_PORT) bash tests/opfs/run.sh --no-build
+
+build-opfs-tests:
+	wasm-pack build --target web --release -- --features opfs-tests
+	@echo "── built $(WASM_BIN) (with opfs-tests)"
 
 test-all: test-native test-wasm test-opfs
 

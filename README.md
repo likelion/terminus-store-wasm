@@ -102,32 +102,44 @@ build` in `pkg/snippets/`:
 ```js
 // worker.js
 import init, * as wasm from "./pkg/terminus_store_wasm.js";
-import { opfs_attach_buffers } from "./pkg/snippets/terminus-store-wasm-059824aac4d229a3/src/opfs_helpers.js";
+import { opfs_attach_buffers } from "./pkg/snippets/<crate-hash>/src/opfs_helpers.js";
 
 self.onmessage = async (e) => {
   if (e.data.type !== "init") return;
   opfs_attach_buffers(e.data.cmd, e.data.str, e.data.data, e.data.err);
   await init();
 
-  // WASM functions are now available — call your store logic here
+  // Store API is Rust-side — export your own #[wasm_bindgen] functions
+  // that use OpfsPersistence + open_persistence_store, then call them here.
+  // See tests/opfs/worker.js for an example.
 };
 ```
 
-On the Rust side, open a store backed by OPFS:
+The store itself is a Rust API. To use it from JavaScript, write
+`#[wasm_bindgen]`-exported Rust functions that create and query the
+store, then call those from your worker. For example:
 
 ```rust
 use terminus_store_wasm::storage::OpfsPersistence;
 use terminus_store_wasm::store::open_persistence_store;
+use terminus_store_wasm::layer::{Layer, ValueTriple};
 
-let root = get_opfs_root()?;
-let store = open_persistence_store(OpfsPersistence::new(root));
+#[wasm_bindgen]
+pub fn my_store_operation() -> Result<(), JsValue> {
+    let root = get_opfs_root()?;
+    let store = open_persistence_store(OpfsPersistence::new(root));
 
-let db = store.create("main")?;
-let builder = store.create_base_layer()?;
-builder.add_value_triple(ValueTriple::new_node("alice", "knows", "bob"))?;
-let layer = builder.commit()?;
-db.set_head(&layer)?;
+    let db = store.create("main").map_err(io_err)?;
+    let builder = store.create_base_layer().map_err(io_err)?;
+    builder.add_value_triple(ValueTriple::new_node("alice", "knows", "bob"))
+           .map_err(io_err)?;
+    let layer = builder.commit().map_err(io_err)?;
+    db.set_head(&layer).map_err(io_err)?;
+    Ok(())
+}
 ```
+
+Then from the worker: `wasm.my_store_operation()`.
 
 A complete working example lives in [`tests/opfs/`](tests/opfs/).
 Run it with `make test-opfs`.
