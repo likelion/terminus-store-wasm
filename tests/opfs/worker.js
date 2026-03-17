@@ -10,7 +10,7 @@ import { opfs_attach_buffers } from "../../pkg/snippets/terminus-store-wasm-0598
 
 // Wait for shared buffers from main thread, then run tests
 self.onmessage = async (e) => {
-  if (e.data.type !== "init_buffers") return;
+  if (e.data.type !== "init") return;
 
   const { cmd, str, data, err } = e.data;
 
